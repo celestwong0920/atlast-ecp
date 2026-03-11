@@ -27,7 +27,7 @@ ECP_DIR = Path(".ecp")
 BATCH_STATE_FILE = ECP_DIR / "batch_state.json"
 # Production backend — Railway deployment
 # TODO: update to https://api.llachat.com/v1 once custom domain is configured
-ATLAST_API = "https://ecp-api-production.up.railway.app/v1"
+ATLAST_API = "https://api.llachat.com/v1"
 
 _batch_timer: Optional[threading.Timer] = None
 _batch_lock = threading.Lock()
