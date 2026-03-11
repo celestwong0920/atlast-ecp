@@ -121,7 +121,7 @@ def post_tool_use(tool_name: str, tool_input: dict, tool_result: str) -> str:
             }
 
         latency_ms = int((time.time() - in_flight["t_start"]) * 1000)
-        flags = ecp["detect_flags"](str(tool_result))
+        flags = ecp["detect_flags"](str(tool_result), latency_ms=latency_ms)
 
         def _do_record():
             global _last_record

@@ -1,55 +1,104 @@
 """
 ECP Record — data structure, chaining, and hashing.
+Strictly follows ECP-SPEC.md v0.1.
+
+Key conventions (from spec):
+  - id format:          rec_{uuid_hex}
+  - in_hash/out_hash:   sha256:{hex}
+  - chain.prev:         "genesis" for first record (NOT None)
+  - chain.hash:         sha256:{hex} of canonical JSON record
+  - sig:                ed25519:{hex} (from identity.sign)
+  - agent DID:          did:ecp:{sha256(pubkey)[:32]}
 """
 
 import hashlib
 import json
 import time
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 from typing import Optional
 
 
+# ─── Data Structures ──────────────────────────────────────────────────────────
+
 @dataclass
 class ECPStep:
-    type: str           # "llm_call" | "tool_call" | "turn"
-    in_hash: str        # sha256 of input (content never transmitted)
-    out_hash: str       # sha256 of output
+    type: str                       # "llm_call" | "tool_call" | "turn" | "a2a_call"
+    in_hash: str                    # "sha256:{hex}"
+    out_hash: str                   # "sha256:{hex}"
+    latency_ms: int = 0
+    flags: list = field(default_factory=list)
     model: Optional[str] = None
     tokens_in: Optional[int] = None
     tokens_out: Optional[int] = None
-    latency_ms: Optional[int] = None
-    flags: Optional[list] = None   # e.g. ["hedge_detected", "retry"]
+    cost_usd: Optional[float] = None
+    parent_agent: Optional[str] = None   # for A2A scenarios
 
 
 @dataclass
 class ECPChain:
-    prev: Optional[str]  # id of previous record (None if first)
-    hash: str            # sha256 of this record's content
+    prev: str                       # "genesis" for first, else rec_id
+    hash: str                       # "sha256:{hex}" of canonical record
+
+
+@dataclass
+class ECPAnchor:
+    batch_id: Optional[str] = None
+    tx_hash: Optional[str] = None
+    ts: Optional[int] = None
 
 
 @dataclass
 class ECPRecord:
-    id: str
-    agent: str           # did:ecp:{agent_id}
-    ts: int              # unix ms
+    id: str                         # "rec_{hex}"
+    agent: str                      # "did:ecp:{id}"
+    ts: int                         # unix ms
     step: ECPStep
     chain: ECPChain
-    sig: str             # ed25519 signature of (id+agent+ts+in_hash+out_hash+prev)
+    sig: str                        # "ed25519:{hex}" or "unverified"
+    anchor: ECPAnchor = field(default_factory=ECPAnchor)
+
+
+# ─── Hashing ──────────────────────────────────────────────────────────────────
+
+def _sha256_hex(data: str) -> str:
+    """Raw SHA-256 hex."""
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
 def sha256(data: str) -> str:
-    return hashlib.sha256(data.encode()).hexdigest()
+    """SHA-256 with sha256: prefix (spec format)."""
+    return f"sha256:{_sha256_hex(data)}"
 
 
 def hash_content(content) -> str:
-    """Hash any content (str, list, dict) — content stays local."""
+    """
+    Hash any content (str, list, dict) with sha256: prefix.
+    Content stays local — only hash is transmitted.
+    """
     if isinstance(content, str):
         raw = content
     else:
-        raw = json.dumps(content, sort_keys=True, ensure_ascii=False)
+        raw = json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return sha256(raw)
 
+
+def compute_chain_hash(record_dict: dict) -> str:
+    """
+    Compute chain.hash per ECP-SPEC §5.3:
+    sha256 of canonical JSON of the record, with chain.hash set to "".
+    Returns "sha256:{hex}".
+    """
+    # Deep copy to avoid mutation
+    import copy
+    r = copy.deepcopy(record_dict)
+    r.setdefault("chain", {})["hash"] = ""
+    # Canonical JSON: sorted keys, no spaces
+    canonical = json.dumps(r, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return sha256(canonical)
+
+
+# ─── Record Creation ──────────────────────────────────────────────────────────
 
 def create_record(
     agent_did: str,
@@ -58,41 +107,65 @@ def create_record(
     out_content,
     identity: dict,
     prev_record: Optional["ECPRecord"] = None,
-    model: str = None,
-    tokens_in: int = None,
-    tokens_out: int = None,
-    latency_ms: int = None,
-    flags: list = None,
+    model: Optional[str] = None,
+    tokens_in: Optional[int] = None,
+    tokens_out: Optional[int] = None,
+    latency_ms: int = 0,
+    flags: Optional[list] = None,
+    parent_agent: Optional[str] = None,
 ) -> ECPRecord:
-    record_id = f"ecp_{uuid.uuid4().hex[:16]}"
+    """
+    Create a new ECP record, correctly chained to prev_record.
+    Follows ECP-SPEC.md v0.1 field conventions.
+    """
+    record_id = f"rec_{uuid.uuid4().hex[:16]}"
     ts = int(time.time() * 1000)
 
     in_hash = hash_content(in_content)
     out_hash = hash_content(out_content)
-    prev_id = prev_record.id if prev_record else None
+
+    # chain.prev: "genesis" for first record (spec §6.1)
+    prev_id = prev_record.id if prev_record else "genesis"
 
     step = ECPStep(
         type=step_type,
         in_hash=in_hash,
         out_hash=out_hash,
+        latency_ms=latency_ms,
+        flags=flags or [],
         model=model,
         tokens_in=tokens_in,
         tokens_out=tokens_out,
-        latency_ms=latency_ms,
-        flags=flags or [],
+        parent_agent=parent_agent,
     )
 
-    # Signing payload — deterministic string
-    sign_payload = f"{record_id}|{agent_did}|{ts}|{in_hash}|{out_hash}|{prev_id or 'genesis'}"
+    # Build partial record dict for chain hash computation
+    partial = {
+        "ecp": "0.1",
+        "id": record_id,
+        "agent": agent_did,
+        "ts": ts,
+        "step": {
+            "type": step.type,
+            "in_hash": step.in_hash,
+            "out_hash": step.out_hash,
+            "latency_ms": step.latency_ms,
+            "flags": step.flags,
+            **({"model": step.model} if step.model else {}),
+            **({"tokens_in": step.tokens_in} if step.tokens_in is not None else {}),
+            **({"tokens_out": step.tokens_out} if step.tokens_out is not None else {}),
+        },
+        "chain": {"prev": prev_id, "hash": ""},
+        "sig": "",
+    }
+
+    chain_hash = compute_chain_hash(partial)
 
     from .identity import sign
-    sig = sign(identity, sign_payload)
+    sig = sign(identity, chain_hash)
 
-    # Record hash (used as chain link for next record)
-    record_content = f"{record_id}{agent_did}{ts}{in_hash}{out_hash}{prev_id or ''}{sig}"
-    record_hash = sha256(record_content)
-
-    chain = ECPChain(prev=prev_id, hash=record_hash)
+    chain = ECPChain(prev=prev_id, hash=chain_hash)
+    anchor = ECPAnchor()
 
     return ECPRecord(
         id=record_id,
@@ -101,15 +174,57 @@ def create_record(
         step=step,
         chain=chain,
         sig=sig,
+        anchor=anchor,
     )
 
 
+# ─── Serialization ────────────────────────────────────────────────────────────
+
 def record_to_dict(record: ECPRecord) -> dict:
-    return {
+    """Serialize ECPRecord to dict matching ECP-SPEC canonical format."""
+    step = record.step
+    chain = record.chain
+    anchor = record.anchor
+
+    d = {
+        "ecp": "0.1",
         "id": record.id,
         "agent": record.agent,
         "ts": record.ts,
-        "step": asdict(record.step),
-        "chain": asdict(record.chain),
+        "step": {
+            "type": step.type,
+            "in_hash": step.in_hash,
+            "out_hash": step.out_hash,
+            "latency_ms": step.latency_ms,
+            "flags": step.flags,
+        },
+        "chain": {
+            "prev": chain.prev,
+            "hash": chain.hash,
+        },
         "sig": record.sig,
     }
+
+    # Optional step fields (only include if set)
+    if step.model:
+        d["step"]["model"] = step.model
+    if step.tokens_in is not None:
+        d["step"]["tokens_in"] = step.tokens_in
+    if step.tokens_out is not None:
+        d["step"]["tokens_out"] = step.tokens_out
+    if step.cost_usd is not None:
+        d["step"]["cost_usd"] = step.cost_usd
+    if step.parent_agent:
+        d["step"]["parent_agent"] = step.parent_agent
+
+    # Anchor (filled async after on-chain batch)
+    if anchor.batch_id or anchor.tx_hash:
+        d["anchor"] = {}
+        if anchor.batch_id:
+            d["anchor"]["batch_id"] = anchor.batch_id
+        if anchor.tx_hash:
+            d["anchor"]["tx_hash"] = anchor.tx_hash
+        if anchor.ts:
+            d["anchor"]["ts"] = anchor.ts
+
+    return d

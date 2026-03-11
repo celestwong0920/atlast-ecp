@@ -48,7 +48,7 @@ def _record_async(
         try:
             from .record import hash_content
             out_text = _extract_text(out_content)
-            flags = detect_flags(out_text, is_retry=is_retry)
+            flags = detect_flags(out_text, is_retry=is_retry, latency_ms=latency_ms)
 
             record = create_record(
                 agent_did=_ctx.identity["did"],

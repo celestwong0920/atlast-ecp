@@ -1,108 +1,144 @@
 """
 ECP Signals — passive behavioral signal detection.
-All signals are detected locally, never LLM-as-Judge.
-Agent cannot control or self-report these.
+All signals are detected locally via rule engine. Never LLM-as-Judge.
+Agent CANNOT control or self-report these flags.
+
+Flags per ECP-SPEC §4:
+  retried        — Agent was asked to redo this task (Negative)
+  hedged         — Output contained uncertainty language (Neutral)
+  incomplete     — Conversation ended without resolution (Negative)
+  high_latency   — Response time > 2x agent's median (Neutral)
+  error          — Agent returned an error state (Negative)
+  human_review   — Agent requested human verification (Positive)
+  a2a_delegated  — Task delegated to sub-agent (Neutral)
 """
 
 import re
+import statistics
 from typing import Optional
 
-# Hedge language patterns (locale-aware)
+# ─── Pattern Banks ─────────────────────────────────────────────────────────────
+
 HEDGE_PATTERNS = [
     # English
-    r"\bi think\b", r"\bi believe\b", r"\bi'm not sure\b",
-    r"\bprobably\b", r"\bperhaps\b", r"\bmaybe\b", r"\bmight\b",
+    r"\bi think\b", r"\bi believe\b", r"\bi'm not sure\b", r"\bi am not sure\b",
+    r"\bprobably\b", r"\bperhaps\b", r"\bmaybe\b", r"\bmight be\b",
     r"\bcould be\b", r"\bit's possible\b", r"\bpossibly\b",
     r"\buncertain\b", r"\bnot certain\b", r"\bnot sure\b",
-    r"\bi'm unsure\b", r"\bapproximately\b", r"\baround\b",
+    r"\bi'm unsure\b", r"\bapproximately\b",
     r"\bit seems\b", r"\bseems like\b", r"\bappears to\b",
-    r"\bto the best of my knowledge\b", r"\bif i recall\b",
-    r"\bi may be wrong\b", r"\btake this with\b",
+    r"\bto the best of my knowledge\b", r"\bif i recall correctly\b",
+    r"\bi may be wrong\b", r"\bi might be wrong\b",
+    r"\bI cannot guarantee\b", r"\bnot 100%\b",
     # Chinese
     r"我觉得", r"我认为", r"可能", r"也许", r"大概",
     r"不确定", r"应该是", r"或许", r"似乎", r"好像",
-    r"不太清楚", r"不是很确定", r"我不确定",
+    r"不太清楚", r"不是很确定",
 ]
 
-# Compiled patterns (performance)
-_COMPILED_HEDGE = [re.compile(p, re.IGNORECASE) for p in HEDGE_PATTERNS]
-
-# Incomplete/abandonment patterns
 INCOMPLETE_PATTERNS = [
-    r"\bi cannot\b", r"\bi can't\b", r"\bunable to\b",
-    r"\bnot able to\b", r"\boutside my (capabilities|scope|knowledge)\b",
-    r"\bi don't have access\b", r"\bi apologize.{0,30}(can't|cannot|unable)\b",
-    r"无法", r"做不到", r"超出了我的", r"我没有权限",
+    r"\bi cannot\b", r"\bi can't\b", r"\bi cant\b", r"\bunable to\b",
+    r"\bnot able to\b",
+    r"\boutside my (capabilities|scope|knowledge|ability)\b",
+    r"\bi don't have access\b", r"\bi do not have access\b",
+    r"\bi (cannot|can't) (help|assist|access|do)\b",
+    r"\bbeyond (my|the) (scope|capabilities)\b",
+    r"无法", r"做不到", r"超出了我的", r"我没有权限", r"无权访问",
 ]
-_COMPILED_INCOMPLETE = [re.compile(p, re.IGNORECASE) for p in INCOMPLETE_PATTERNS]
 
-# Error signal patterns
 ERROR_PATTERNS = [
-    r"\berror\b", r"\bexception\b", r"\bfailed\b", r"\bfailure\b",
-    r"\btraceback\b", r"\bstack trace\b",
+    r"Traceback \(most recent call last\)",   # Python traceback (no \b after paren)
+    r"\bException:", r"\bError:", r"\bValueError:", r"\bTypeError:",
+    r"\bRuntimeError:", r"\bAttributeError:", r"\bKeyError:",
+    r"500 Internal Server Error",
+    r"\bfailed with exit code\b",
 ]
-_COMPILED_ERROR = [re.compile(p, re.IGNORECASE) for p in ERROR_PATTERNS]
+
+HUMAN_REVIEW_PATTERNS = [
+    r"\bplease (verify|review|confirm|check)\b",
+    r"\byou (should|may want to) (verify|review|confirm|check)\b",
+    r"\bI recommend (verifying|reviewing|checking)\b",
+    r"\bconsult (a|an) (lawyer|doctor|expert|professional|specialist)\b",
+    r"\bseek (professional|legal|medical|expert) (advice|opinion|review)\b",
+    r"\bhuman (review|oversight|verification) (is|may be) (recommended|required|advised)\b",
+    r"建议核实", r"请专业人士", r"建议咨询", r"人工审核",
+]
+
+A2A_PATTERNS = [
+    r"\bi('ll| will) (delegate|pass|hand off|forward) (this|that)\b",
+    r"\bcalling (sub-?agent|another agent|agent)\b",
+    r"\bdelegating to\b",
+    r"\busing (tool|agent):",
+]
+
+# Pre-compile for performance
+_HEDGE = [re.compile(p, re.IGNORECASE) for p in HEDGE_PATTERNS]
+_INCOMPLETE = [re.compile(p, re.IGNORECASE) for p in INCOMPLETE_PATTERNS]
+_ERROR = [re.compile(p, re.IGNORECASE) for p in ERROR_PATTERNS]
+_HUMAN_REVIEW = [re.compile(p, re.IGNORECASE) for p in HUMAN_REVIEW_PATTERNS]
+_A2A = [re.compile(p, re.IGNORECASE) for p in A2A_PATTERNS]
+
+# High-latency threshold (ms) — default 5 seconds
+HIGH_LATENCY_THRESHOLD_MS = 5000
 
 
-def detect_flags(output_text: str, is_retry: bool = False) -> list[str]:
+# ─── Flag Detection ────────────────────────────────────────────────────────────
+
+def detect_flags(
+    output_text: str,
+    is_retry: bool = False,
+    latency_ms: Optional[int] = None,
+    median_latency_ms: Optional[int] = None,
+    is_a2a: bool = False,
+) -> list[str]:
     """
-    Passively detect behavioral flags from output text.
-    Returns list of flag strings.
+    Passively detect all applicable behavioral flags from output text.
+    Returns sorted list of flag strings matching ECP-SPEC §4.
     """
     flags = []
+    text = (output_text or "").strip()
 
-    if not output_text:
-        return ["incomplete"]
-
-    text = output_text.strip()
-
-    # Retry signal (set externally when the same task is invoked again)
     if is_retry:
         flags.append("retried")
 
-    # Hedge detection
-    if _detect_hedge(text):
+    if not text:
+        flags.append("incomplete")
+        return sorted(flags)
+
+    if _match_any(_HEDGE, text):
         flags.append("hedged")
 
-    # Incomplete detection
-    if _detect_incomplete(text):
+    if _match_any(_INCOMPLETE, text):
         flags.append("incomplete")
 
-    # Error detection
-    if _detect_error(text):
+    # high_latency: > 2x median OR > absolute threshold
+    if latency_ms is not None:
+        threshold = (median_latency_ms * 2) if median_latency_ms else HIGH_LATENCY_THRESHOLD_MS
+        if latency_ms > threshold:
+            flags.append("high_latency")
+
+    if _match_any(_ERROR, text):
         flags.append("error")
 
-    return flags
+    if _match_any(_HUMAN_REVIEW, text):
+        flags.append("human_review")
+
+    if is_a2a or _match_any(_A2A, text):
+        flags.append("a2a_delegated")
+
+    return sorted(flags)
 
 
-def _detect_hedge(text: str) -> bool:
-    """Returns True if output contains hedge language."""
-    for pattern in _COMPILED_HEDGE:
-        if pattern.search(text):
-            return True
-    return False
+def _match_any(patterns: list, text: str) -> bool:
+    return any(p.search(text) for p in patterns)
 
 
-def _detect_incomplete(text: str) -> bool:
-    """Returns True if output signals inability to complete the task."""
-    for pattern in _COMPILED_INCOMPLETE:
-        if pattern.search(text):
-            return True
-    return False
-
-
-def _detect_error(text: str) -> bool:
-    """Returns True if output contains error signals."""
-    for pattern in _COMPILED_ERROR:
-        if pattern.search(text):
-            return True
-    return False
-
+# ─── Aggregate Trust Signals ───────────────────────────────────────────────────
 
 def compute_trust_signals(records: list[dict]) -> dict:
     """
-    Compute aggregate Trust Score signals from a list of ECP records.
-    Used for batch reporting, not for individual record scoring.
+    Compute aggregate Trust Score input signals from a list of ECP records.
+    All signals are passive and objective. No self-reporting.
     """
     if not records:
         return {
@@ -110,39 +146,51 @@ def compute_trust_signals(records: list[dict]) -> dict:
             "retried_rate": 0.0,
             "hedged_rate": 0.0,
             "incomplete_rate": 0.0,
+            "high_latency_rate": 0.0,
             "error_rate": 0.0,
+            "human_review_rate": 0.0,
             "chain_integrity": 1.0,
             "avg_latency_ms": 0,
         }
 
     total = len(records)
-    retried = sum(1 for r in records if "retried" in (r.get("step", {}).get("flags") or []))
-    hedged = sum(1 for r in records if "hedged" in (r.get("step", {}).get("flags") or []))
-    incomplete = sum(1 for r in records if "incomplete" in (r.get("step", {}).get("flags") or []))
-    errors = sum(1 for r in records if "error" in (r.get("step", {}).get("flags") or []))
-    latencies = [r["step"]["latency_ms"] for r in records if r.get("step", {}).get("latency_ms")]
 
-    # Chain integrity: check prev links are consistent
+    def _flag_count(flag: str) -> int:
+        return sum(1 for r in records if flag in (r.get("step", {}).get("flags") or []))
+
+    latencies = [
+        r["step"]["latency_ms"]
+        for r in records
+        if r.get("step", {}).get("latency_ms")
+    ]
+
     chain_ok = _check_chain_integrity(records)
 
     return {
         "total": total,
-        "retried_rate": round(retried / total, 4),
-        "hedged_rate": round(hedged / total, 4),
-        "incomplete_rate": round(incomplete / total, 4),
-        "error_rate": round(errors / total, 4),
+        "retried_rate": round(_flag_count("retried") / total, 4),
+        "hedged_rate": round(_flag_count("hedged") / total, 4),
+        "incomplete_rate": round(_flag_count("incomplete") / total, 4),
+        "high_latency_rate": round(_flag_count("high_latency") / total, 4),
+        "error_rate": round(_flag_count("error") / total, 4),
+        "human_review_rate": round(_flag_count("human_review") / total, 4),
         "chain_integrity": 1.0 if chain_ok else 0.0,
-        "avg_latency_ms": int(sum(latencies) / len(latencies)) if latencies else 0,
+        "avg_latency_ms": int(statistics.mean(latencies)) if latencies else 0,
     }
 
 
 def _check_chain_integrity(records: list[dict]) -> bool:
-    """Verify that the chain of records is unbroken."""
+    """
+    Verify chain.prev links are consistent across records.
+    Records should be ordered oldest → newest.
+    """
     if len(records) <= 1:
         return True
-    for i in range(1, len(records)):
-        expected_prev = records[i - 1]["id"]
-        actual_prev = records[i].get("chain", {}).get("prev")
+    # Sort by ts to ensure correct order
+    sorted_records = sorted(records, key=lambda r: r.get("ts", 0))
+    for i in range(1, len(sorted_records)):
+        expected_prev = sorted_records[i - 1]["id"]
+        actual_prev = sorted_records[i].get("chain", {}).get("prev")
         if actual_prev != expected_prev:
             return False
     return True

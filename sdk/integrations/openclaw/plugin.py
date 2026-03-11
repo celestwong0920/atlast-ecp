@@ -86,11 +86,11 @@ def on_tool_result(
                 "session_id": session_id,
             }
             out_text = str(tool_result)
-            flags = detect_flags(out_text)
+            flags = detect_flags(out_text, latency_ms=latency_ms)
 
             record = create_record(
                 agent_did=identity["did"],
-                step_type="tool_call",
+                step_type="turn",   # OpenClaw = turn-level recording (ECP-SPEC §3.1)
                 in_content=in_content,
                 out_content=out_text,
                 identity=identity,

@@ -5,7 +5,7 @@ Content NEVER leaves the device. Only hashes are transmitted.
 
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -35,7 +35,7 @@ def save_record(record_dict: dict, local_summary: Optional[str] = None) -> str:
     """
     init_storage()
 
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     record_file = RECORDS_DIR / f"{today}.jsonl"
 
     with _lock:
