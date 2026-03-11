@@ -1,6 +1,19 @@
 """
-ECP Backend — SQLite Database
-Zero external dependencies for MVP. Migrate to Postgres when scaling.
+ECP Backend — Database Layer (SQLite for MVP)
+
+Migration path when you outgrow SQLite:
+  Phase 1 (0–10K agents):  SQLite + WAL ← current
+  Phase 2 (10K–100K):      Railway Postgres (set DATABASE_URL env var)
+  Phase 3 (100K+):         RDS Postgres + PgBouncer + Redis cache
+
+To migrate to Postgres:
+  1. Set DATABASE_URL env var (e.g., postgres://user:pass@host/db)
+  2. Replace sqlite3 with psycopg2 / asyncpg
+  3. Replace ? placeholders → %s (psycopg2) or $1..$N (asyncpg)
+  4. Replace executescript() → multiple execute() calls
+  5. Remove PRAGMA lines (not needed in Postgres)
+
+SQL schema is Postgres-compatible (no SQLite-specific types used intentionally).
 """
 
 import sqlite3
