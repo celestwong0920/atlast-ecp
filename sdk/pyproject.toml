@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "atlast-ecp"
+version = "0.1.0"
+description = "ATLAST Evidence Chain Protocol — passive trust recording for AI Agents"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "ATLAST Protocol Working Group" }
+]
+keywords = ["ai", "agent", "trust", "ecp", "atlast", "llm", "audit", "evidence"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
+requires-python = ">=3.10"
+dependencies = []  # Zero required dependencies — Fail-Open by design
+
+[project.optional-dependencies]
+crypto = ["cryptography>=42.0"]   # For ed25519 signing (recommended)
+dev = [
+    "pytest>=8.0",
+    "anthropic>=0.25",
+    "openai>=1.30",
+    "cryptography>=42.0",
+]
+
+[project.scripts]
+atlast = "atlast_ecp.cli:main"
+atlast-ecp-mcp = "atlast_ecp.mcp_server:run_stdio_server"
+
+[project.urls]
+Homepage = "https://llachat.com"
+Repository = "https://github.com/celestwong0920/atlast-ecp"
+Documentation = "https://github.com/celestwong0920/atlast-ecp/blob/main/ECP-SPEC.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["atlast_ecp*"]

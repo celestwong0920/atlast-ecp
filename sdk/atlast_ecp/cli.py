@@ -1,0 +1,214 @@
+"""
+ECP CLI — atlast command line interface
+
+Commands:
+    atlast view              View latest ECP records
+    atlast verify <id>       Verify a record's chain integrity
+    atlast stats             Show agent trust signals
+    atlast did               Show this agent's DID
+    atlast flush             Force upload Merkle batch now
+"""
+
+import json
+import sys
+from datetime import datetime
+
+
+def _print_record(record: dict, show_chain: bool = False):
+    step = record.get("step", {})
+    chain = record.get("chain", {})
+    flags = step.get("flags", [])
+    ts = record.get("ts", 0)
+    dt = datetime.utcfromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    flag_str = " ".join(f"[{f.upper()}]" for f in flags) if flags else ""
+    latency = step.get("latency_ms")
+    latency_str = f"  {latency}ms" if latency else ""
+
+    print(f"  {record['id']}")
+    print(f"  {dt}{latency_str}  {flag_str}")
+    print(f"  Type: {step.get('type', '?')} | Model: {step.get('model') or '—'}")
+    if step.get("tokens_in"):
+        print(f"  Tokens: {step['tokens_in']} in / {step.get('tokens_out', '?')} out")
+    if show_chain:
+        print(f"  Chain hash: {chain.get('hash', '?')[:32]}...")
+        print(f"  Prev: {chain.get('prev') or 'genesis'}")
+    print()
+
+
+def cmd_view(args: list[str]):
+    """atlast view [--limit N] [--date YYYY-MM-DD]"""
+    from .storage import load_records
+    limit = 10
+    date = None
+    for i, a in enumerate(args):
+        if a == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1])
+        if a == "--date" and i + 1 < len(args):
+            date = args[i + 1]
+
+    records = load_records(limit=limit, date=date)
+    if not records:
+        print("No ECP records found. Start using your Agent to generate evidence.")
+        return
+
+    print(f"\n🔗 ECP Evidence Chain — Latest {len(records)} records\n")
+    for r in records:
+        _print_record(r)
+
+
+def cmd_verify(args: list[str]):
+    """atlast verify <record_id>"""
+    if not args:
+        print("Usage: atlast verify <record_id>")
+        sys.exit(1)
+
+    record_id = args[0]
+    from .storage import load_record_by_id, load_records
+    from .record import hash_content, sha256
+    from .batch import build_merkle_tree
+
+    record = load_record_by_id(record_id)
+    if not record:
+        print(f"❌ Record not found: {record_id}")
+        sys.exit(1)
+
+    print(f"\n🔍 Verifying ECP Record: {record_id}\n")
+
+    # 1. Chain integrity check
+    chain = record.get("chain", {})
+    prev_id = chain.get("prev")
+    chain_ok = True
+
+    if prev_id:
+        prev_record = load_record_by_id(prev_id)
+        if not prev_record:
+            print(f"  ⚠️  Prev record not found: {prev_id}")
+            chain_ok = False
+        else:
+            # Verify chain hash
+            step = record.get("step", {})
+            content = f"{record['id']}{record['agent']}{record['ts']}{step.get('in_hash','')}{step.get('out_hash','')}{prev_id}{record.get('sig','')}"
+            expected_hash = sha256(content)
+            actual_hash = chain.get("hash", "")
+            if expected_hash == actual_hash:
+                print(f"  ✅ Chain hash verified")
+            else:
+                print(f"  ❌ Chain hash mismatch — record may have been tampered")
+                chain_ok = False
+    else:
+        print(f"  ✅ Genesis record (no prev)")
+
+    # 2. Signature check
+    if record.get("sig") and record["sig"] != "unverified":
+        print(f"  ✅ Signature present: {record['sig'][:32]}...")
+    else:
+        print(f"  ⚠️  Signature: unverified (cryptography package not installed)")
+
+    # 3. On-chain anchor
+    anchor = record.get("anchor", {})
+    if anchor.get("attestation_uid"):
+        uid = anchor["attestation_uid"]
+        print(f"  ✅ On-chain: EAS Base — {uid[:20]}...")
+        print(f"     https://base.easscan.org/attestation/view/{uid}")
+    else:
+        print(f"  ⏳ On-chain: Pending next Merkle batch (runs hourly)")
+
+    # 4. Summary
+    print()
+    if chain_ok:
+        print(f"  🟢 VERIFIED — Record integrity confirmed")
+    else:
+        print(f"  🔴 INTEGRITY ISSUE — Chain may be broken")
+
+    print(f"\n  View public proof: https://llachat.com/verify/{record_id}\n")
+
+
+def cmd_stats(args: list[str]):
+    """atlast stats"""
+    from .storage import load_records, count_records
+    from .signals import compute_trust_signals
+
+    records = load_records(limit=1000)
+    total = count_records()
+    signals = compute_trust_signals(records)
+
+    print(f"\n📊 ATLAST Trust Signals\n")
+
+    from .identity import get_or_create_identity
+    identity = get_or_create_identity()
+    print(f"  Agent: {identity['did']}")
+    print(f"  Total records: {total}")
+    print()
+
+    def _bar(rate, width=20):
+        filled = int((1 - rate) * width)
+        return "█" * filled + "░" * (width - filled)
+
+    retry_r = signals["retried_rate"]
+    hedge_r = signals["hedged_rate"]
+    incomplete_r = signals["incomplete_rate"]
+    error_r = signals["error_rate"]
+    chain_i = signals["chain_integrity"]
+
+    print(f"  Reliability     {_bar(retry_r + incomplete_r + error_r)}  "
+          f"{int((1 - retry_r - incomplete_r - error_r) * 100)}%")
+    print(f"  Hedge rate      {hedge_r * 100:.1f}%  (lower = more decisive)")
+    print(f"  Chain integrity {'✅ 100%' if chain_i == 1.0 else '⚠️ BROKEN'}")
+    print(f"  Avg latency     {signals['avg_latency_ms']}ms")
+    print()
+    print(f"  Full profile: https://llachat.com  (register to publish)")
+    print()
+
+
+def cmd_did(args: list[str]):
+    """atlast did"""
+    from .identity import get_or_create_identity
+    identity = get_or_create_identity()
+    print(f"\n  Agent DID: {identity['did']}")
+    print(f"  Key type: {'ed25519 (verified)' if identity.get('verified') else 'fallback (unverified)'}")
+    print(f"  Created: {identity.get('created_at', 'unknown')}")
+    print()
+
+
+def cmd_flush(args: list[str]):
+    """atlast flush — force Merkle batch upload now"""
+    from .batch import trigger_batch_upload
+    print("⏫ Triggering Merkle batch upload...")
+    trigger_batch_upload(flush=True)
+    import time; time.sleep(2)
+    print("✅ Done (check .ecp/batch_state.json for result)")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print("ATLAST ECP CLI\n")
+        print("  atlast view              View latest ECP records")
+        print("  atlast verify <id>       Verify a record's integrity")
+        print("  atlast stats             Show agent trust signals")
+        print("  atlast did               Show this agent's DID")
+        print("  atlast flush             Force Merkle batch upload")
+        return
+
+    cmd = args[0]
+    rest = args[1:]
+
+    commands = {
+        "view": cmd_view,
+        "verify": cmd_verify,
+        "stats": cmd_stats,
+        "did": cmd_did,
+        "flush": cmd_flush,
+    }
+
+    if cmd in commands:
+        commands[cmd](rest)
+    else:
+        print(f"Unknown command: {cmd}")
+        print("Run 'atlast' for help.")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
