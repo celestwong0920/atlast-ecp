@@ -344,6 +344,81 @@ class TestMerkle:
         from atlast_ecp.batch import build_merkle_tree
         root, _ = build_merkle_tree([])
         assert root  # Returns sha256("empty")
+        assert root.startswith("sha256:")  # Must have prefix
+
+    def test_merkle_root_has_sha256_prefix(self):
+        """Root must have sha256: prefix — backend validator requires it."""
+        from atlast_ecp.batch import build_merkle_tree
+        hashes = ["sha256:aaa", "sha256:bbb", "sha256:ccc", "sha256:ddd"]
+        root, _ = build_merkle_tree(hashes)
+        assert root.startswith("sha256:"), f"Root must start with sha256:, got: {root}"
+
+    def test_merkle_intermediate_nodes_have_prefix(self):
+        """All tree levels must have sha256: prefix (not just leaves)."""
+        from atlast_ecp.batch import build_merkle_tree
+        hashes = ["sha256:a1", "sha256:b2", "sha256:c3", "sha256:d4"]
+        root, layers = build_merkle_tree(hashes)
+        for layer in layers[1:]:  # Skip leaves (provided by caller)
+            for node in layer:
+                assert node.startswith("sha256:"), f"Node must have sha256: prefix: {node}"
+
+    def test_batch_record_hashes_payload(self):
+        """_build_record_hashes_payload returns valid entries for backend."""
+        from atlast_ecp.batch import _build_record_hashes_payload
+        records = [
+            {"id": "rec_abc123", "chain": {"hash": "sha256:deadbeef"}, "step": {"flags": {"hedged": True, "retried": False}}},
+            {"id": "rec_def456", "chain": {"hash": "sha256:cafebabe"}, "step": {"flags": {}}},
+            {"id": "bad_id", "chain": {"hash": "sha256:xxx"}},           # bad ID — should be excluded
+            {"id": "rec_ok789", "chain": {"hash": "nohash"}},            # bad hash — should be excluded
+        ]
+        result = _build_record_hashes_payload(records)
+        assert len(result) == 2  # Only valid entries
+        assert all(e["id"].startswith("rec_") for e in result)
+        assert all(e["hash"].startswith("sha256:") for e in result)
+        assert "flags" in result[0]
+
+    def test_aggregate_flag_counts(self):
+        """_aggregate_flag_counts aggregates correctly."""
+        from atlast_ecp.batch import _aggregate_flag_counts
+        records = [
+            {"step": {"flags": {"hedged": True, "retried": True}}},
+            {"step": {"flags": {"hedged": True, "retried": False}}},
+            {"step": {"flags": {"hedged": False, "error": True}}},
+            {"step": {}},  # No flags key
+        ]
+        counts = _aggregate_flag_counts(records)
+        assert counts["hedged"] == 2
+        assert counts["retried"] == 1
+        assert counts["error"] == 1
+        assert "confidence" not in counts  # No confidence field
+
+    def test_upload_payload_has_batch_ts_as_int(self):
+        """upload_merkle_root must send batch_ts as int (Unix ms), not ISO string."""
+        import json
+        import unittest.mock as mock
+        from atlast_ecp.batch import upload_merkle_root
+
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["body"] = json.loads(req.data)
+            raise Exception("abort_after_capture")  # Don't actually send
+
+        with mock.patch("urllib.request.urlopen", fake_urlopen):
+            upload_merkle_root(
+                merkle_root="sha256:abc123",
+                agent_did="did:ecp:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+                record_count=5,
+                avg_latency_ms=100,
+                batch_ts=1710000000000,  # Unix ms
+                sig="unverified",
+            )
+
+        body = captured.get("body", {})
+        assert isinstance(body.get("batch_ts"), int), "batch_ts must be int, not string"
+        assert "sig" in body, "sig field must be present in payload"
+        assert body["sig"] == "unverified"
+        assert body["merkle_root"].startswith("sha256:")
 
 
 # ─── 6. Chain Integrity ───────────────────────────────────────────────────────
