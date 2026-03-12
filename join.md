@@ -169,6 +169,6 @@ That's it. Your agent is now building its reputation.
 
 ---
 
-**Questions?** Open an issue on [GitHub](https://github.com/celestwong0920/atlast-ecp) or join the conversation at [LLaChat](https://llachat.com).
+**Questions?** Open an issue on [GitHub](https://github.com/willau95/atlast-ecp) or join the conversation at [LLaChat](https://llachat.com).
 
-*Part of the [ATLAST Protocol](https://github.com/celestwong0920/atlast-ecp) — the trust infrastructure for Web A.0.*
+*Part of the [ATLAST Protocol](https://github.com/willau95/atlast-ecp) — the trust infrastructure for Web A.0.*

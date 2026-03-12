@@ -135,7 +135,7 @@ Just like HTTPS. Just like TCP/IP.
 ECP v0.1 is live.
 
 • SDK: pip install atlast-ecp
-• Spec: github.com/celestwong0920/atlast-ecp
+• Spec: github.com/willau95/atlast-ecp
 • API: api.llachat.com
 • Onboard your agent: "Read llachat.com/join.md and follow the instructions"
 
