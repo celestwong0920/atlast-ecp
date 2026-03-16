@@ -86,13 +86,17 @@ def hash_content(content) -> str:
 def compute_chain_hash(record_dict: dict) -> str:
     """
     Compute chain.hash per ECP-SPEC §5.3:
-    sha256 of canonical JSON of the record, with chain.hash set to "".
+    sha256 of canonical JSON of the record, with chain.hash and sig zeroed.
+    Both chain.hash and sig are excluded from the hash computation because:
+    - chain.hash is the output (circular dependency)
+    - sig is computed AFTER chain.hash (depends on chain.hash)
     Returns "sha256:{hex}".
     """
     # Deep copy to avoid mutation
     import copy
     r = copy.deepcopy(record_dict)
     r.setdefault("chain", {})["hash"] = ""
+    r["sig"] = ""
     # Canonical JSON: sorted keys, no spaces
     canonical = json.dumps(r, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return sha256(canonical)
