@@ -189,8 +189,8 @@ def cmd_register(args: list[str]):
     print(f"\n🔗 Registering Agent: {did}")
 
     payload = json.dumps({
-        "agent_did": did,
-        "pub_key": pub_key,
+        "did": did,
+        "public_key": pub_key,
         "ecp_version": "0.1",
     }).encode()
 
