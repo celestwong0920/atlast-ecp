@@ -73,28 +73,29 @@ def cmd_verify(args: list[str]):
 
     print(f"\n🔍 Verifying ECP Record: {record_id}\n")
 
-    # 1. Chain integrity check
+    # 1. Chain hash integrity check (always verify, regardless of prev)
     chain = record.get("chain", {})
     prev_id = chain.get("prev")
     chain_ok = True
 
-    if prev_id:
+    from .record import compute_chain_hash
+    expected_hash = compute_chain_hash(record)
+    actual_hash = chain.get("hash", "")
+    if expected_hash == actual_hash:
+        print(f"  ✅ Chain hash verified")
+    else:
+        print(f"  ❌ Chain hash mismatch — record may have been tampered")
+        chain_ok = False
+
+    # 1b. Chain link check (prev record exists?)
+    if prev_id and prev_id != "genesis":
         prev_record = load_record_by_id(prev_id)
         if not prev_record:
-            print(f"  ⚠️  Prev record not found: {prev_id}")
-            chain_ok = False
+            print(f"  ⚠️  Previous record not found: {prev_id}")
         else:
-            # Verify chain hash using the same algorithm as record.py
-            from .record import compute_chain_hash
-            expected_hash = compute_chain_hash(record)
-            actual_hash = chain.get("hash", "")
-            if expected_hash == actual_hash:
-                print(f"  ✅ Chain hash verified")
-            else:
-                print(f"  ❌ Chain hash mismatch — record may have been tampered")
-                chain_ok = False
-    else:
-        print(f"  ✅ Genesis record (no prev)")
+            print(f"  ✅ Chain link: → {prev_id}")
+    elif prev_id == "genesis":
+        print(f"  ✅ Genesis record (first in chain)")
 
     # 2. Signature check
     if record.get("sig") and record["sig"] != "unverified":

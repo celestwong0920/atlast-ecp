@@ -181,16 +181,34 @@ def compute_trust_signals(records: list[dict]) -> dict:
 
 def _check_chain_integrity(records: list[dict]) -> bool:
     """
-    Verify chain.prev links are consistent across records.
-    Records should be ordered oldest → newest.
+    Verify chain.prev links form a valid chain.
+    Uses the prev→id graph instead of timestamp sorting (timestamps can collide).
     """
     if len(records) <= 1:
         return True
-    # Sort by ts to ensure correct order
-    sorted_records = sorted(records, key=lambda r: r.get("ts", 0))
-    for i in range(1, len(sorted_records)):
-        expected_prev = sorted_records[i - 1]["id"]
-        actual_prev = sorted_records[i].get("chain", {}).get("prev")
-        if actual_prev != expected_prev:
-            return False
-    return True
+
+    # Build id→record and find genesis
+    by_id = {r["id"]: r for r in records}
+    genesis = [r for r in records if r.get("chain", {}).get("prev") == "genesis"]
+
+    if len(genesis) != 1:
+        return False  # Must have exactly one genesis
+
+    # Walk the chain forward via reverse lookup: prev→next
+    prev_to_record = {}
+    for r in records:
+        prev = r.get("chain", {}).get("prev")
+        if prev and prev != "genesis":
+            prev_to_record[prev] = r
+
+    # Walk from genesis
+    current = genesis[0]
+    visited = {current["id"]}
+    while current["id"] in prev_to_record:
+        current = prev_to_record[current["id"]]
+        if current["id"] in visited:
+            return False  # Cycle detected
+        visited.add(current["id"])
+
+    # All records should be visited
+    return len(visited) == len(records)
