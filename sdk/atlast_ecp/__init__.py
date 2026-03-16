@@ -10,6 +10,7 @@ Usage:
 """
 
 from .wrap import wrap
+from .core import record, record_async, get_identity, reset
 from .identity import get_or_create_identity
 from .record import create_record, record_to_dict
 from .storage import save_record, load_records, load_record_by_id
@@ -19,6 +20,10 @@ from .batch import trigger_batch_upload, run_batch, start_scheduler
 __version__ = "0.1.0"
 __all__ = [
     "wrap",
+    "record",
+    "record_async",
+    "get_identity",
+    "reset",
     "get_or_create_identity",
     "create_record",
     "record_to_dict",

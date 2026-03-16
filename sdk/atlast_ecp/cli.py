@@ -64,9 +64,7 @@ def cmd_verify(args: list[str]):
         sys.exit(1)
 
     record_id = args[0]
-    from .storage import load_record_by_id, load_records
-    from .record import hash_content, sha256
-    from .batch import build_merkle_tree
+    from .storage import load_record_by_id
 
     record = load_record_by_id(record_id)
     if not record:
@@ -86,10 +84,9 @@ def cmd_verify(args: list[str]):
             print(f"  ⚠️  Prev record not found: {prev_id}")
             chain_ok = False
         else:
-            # Verify chain hash
-            step = record.get("step", {})
-            content = f"{record['id']}{record['agent']}{record['ts']}{step.get('in_hash','')}{step.get('out_hash','')}{prev_id}{record.get('sig','')}"
-            expected_hash = sha256(content)
+            # Verify chain hash using the same algorithm as record.py
+            from .record import compute_chain_hash
+            expected_hash = compute_chain_hash(record)
             actual_hash = chain.get("hash", "")
             if expected_hash == actual_hash:
                 print(f"  ✅ Chain hash verified")
@@ -180,26 +177,64 @@ def cmd_flush(args: list[str]):
     print("✅ Done (check .ecp/batch_state.json for result)")
 
 
+def cmd_init(args: list[str]):
+    """atlast init — initialize .ecp/ and generate DID"""
+    from .identity import get_or_create_identity
+    from .storage import init_storage
+    init_storage()
+    identity = get_or_create_identity()
+    print(f"\n🔗 ATLAST ECP initialized")
+    print(f"  Agent DID: {identity['did']}")
+    print(f"  Storage: .ecp/ (local, private)")
+    print(f"  Key type: {'ed25519' if identity.get('verified') else 'fallback'}")
+    print(f"\n  Next: Register at https://llachat.com")
+    print()
+
+
+def cmd_export(args: list[str]):
+    """atlast export [--format json] — export ECP records"""
+    import json as _json
+    from .storage import load_records
+    limit = 100
+    for i, a in enumerate(args):
+        if a == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1])
+
+    records = load_records(limit=limit)
+    if not records:
+        print("No records to export.")
+        return
+
+    output = _json.dumps(records, indent=2, ensure_ascii=False)
+    print(output)
+
+
 def main():
     args = sys.argv[1:]
     if not args:
-        print("ATLAST ECP CLI\n")
+        print("ATLAST ECP CLI v0.1.0\n")
+        print("  atlast init              Initialize .ecp/ and generate DID")
         print("  atlast view              View latest ECP records")
         print("  atlast verify <id>       Verify a record's integrity")
         print("  atlast stats             Show agent trust signals")
         print("  atlast did               Show this agent's DID")
         print("  atlast flush             Force Merkle batch upload")
+        print("  atlast export            Export records as JSON")
+        print()
+        print("  Docs: https://github.com/willau95/atlast-ecp")
         return
 
     cmd = args[0]
     rest = args[1:]
 
     commands = {
+        "init": cmd_init,
         "view": cmd_view,
         "verify": cmd_verify,
         "stats": cmd_stats,
         "did": cmd_did,
         "flush": cmd_flush,
+        "export": cmd_export,
     }
 
     if cmd in commands:

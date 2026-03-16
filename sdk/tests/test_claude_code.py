@@ -25,12 +25,12 @@ sys.path.insert(0, INTEGRATIONS_DIR)
 @pytest.fixture(autouse=True)
 def temp_ecp_dir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    # Reset hook state
+    # Reset core state (hooks now delegate to core)
+    from atlast_ecp.core import reset
+    reset()
+    # Reset hook in-flight tracking
     try:
-        import ecp_hooks
         ecp_hooks._in_flight.clear()
-        ecp_hooks._identity = None
-        ecp_hooks._last_record = None
     except Exception:
         pass
     yield tmp_path

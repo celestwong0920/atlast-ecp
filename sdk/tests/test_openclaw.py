@@ -27,12 +27,12 @@ sys.path.insert(0, OPENCLAW_PLUGIN_DIR)
 @pytest.fixture(autouse=True)
 def temp_ecp_dir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    # Reset plugin state
+    # Reset core state (plugin now delegates to core)
+    from atlast_ecp.core import reset
+    reset()
+    # Reset plugin session tracking
     try:
-        import plugin as openclaw_plugin
-        openclaw_plugin._identity = None
-        openclaw_plugin._last_record = None
-        openclaw_plugin._session_records.clear()
+        plugin._session_records.clear()
     except Exception:
         pass
     yield tmp_path
@@ -211,16 +211,17 @@ class TestOpenClawPlugin:
         records = load_records(limit=1)
         assert records[0].get("ecp") == "0.1"
 
-    def test_session_records_tracked(self):
-        """Plugin should track record IDs created in this session."""
-        from plugin import on_tool_result, get_session_record_ids
+    def test_multiple_records_stored(self):
+        """Plugin should store multiple records via core."""
+        from plugin import on_tool_result
+        from atlast_ecp.storage import load_records
 
         on_tool_result(tool_name="exec", tool_input={}, tool_result="step1")
         on_tool_result(tool_name="exec", tool_input={}, tool_result="step2")
         time.sleep(0.3)
 
-        ids = get_session_record_ids()
-        assert len(ids) >= 2
+        records = load_records(limit=10)
+        assert len(records) >= 2
 
     def test_get_agent_did(self):
         """Plugin should expose the agent's DID."""

@@ -17,12 +17,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture(autouse=True)
 def temp_ecp_dir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    # Reset wrap context between tests — get actual module via sys.modules
-    import atlast_ecp.wrap  # ensure loaded
-    wrap_mod = sys.modules.get("atlast_ecp.wrap")
-    if wrap_mod and hasattr(wrap_mod, "_ctx"):
-        wrap_mod._ctx.last_record = None
-        wrap_mod._ctx.call_hashes = {}
+    # Reset core state between tests
+    from atlast_ecp.core import reset
+    reset()
     yield tmp_path
 
 

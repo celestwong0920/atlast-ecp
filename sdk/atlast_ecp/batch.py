@@ -128,7 +128,7 @@ def _build_record_hashes_payload(records: list[dict]) -> list[dict]:
     for r in records:
         record_id = r.get("id", "")
         chain_hash = r.get("chain", {}).get("hash", "")
-        flags = list(r.get("step", {}).get("flags", {}).keys())
+        flags = r.get("step", {}).get("flags", [])
         # Only include records with valid ids and hashes
         if record_id.startswith("rec_") and chain_hash.startswith("sha256:"):
             entries.append({"id": record_id, "hash": chain_hash, "flags": flags})
@@ -142,10 +142,9 @@ def _aggregate_flag_counts(records: list[dict]) -> dict:
     """
     counts: dict[str, int] = {}
     for r in records:
-        flags: dict = r.get("step", {}).get("flags", {})
-        for flag, triggered in flags.items():
-            if triggered:
-                counts[flag] = counts.get(flag, 0) + 1
+        flags = r.get("step", {}).get("flags", [])
+        for flag in flags:
+            counts[flag] = counts.get(flag, 0) + 1
     return counts
 
 

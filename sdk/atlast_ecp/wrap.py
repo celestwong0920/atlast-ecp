@@ -11,87 +11,9 @@ Usage:
 """
 
 import time
-import threading
 from functools import wraps
-from typing import Optional
 
-from .identity import get_or_create_identity
-from .record import create_record, record_to_dict
-from .storage import save_record
-from .signals import detect_flags
-
-
-class _ECPContext:
-    """Thread-local context for tracking retries and sessions."""
-    def __init__(self):
-        self.identity = get_or_create_identity()
-        self.last_record = None
-        self.call_hashes = {}    # in_hash → count (retry detection)
-        self.lock = threading.Lock()
-
-
-_ctx = _ECPContext()
-
-
-def _record_async(
-    step_type: str,
-    in_content,
-    out_content,
-    model: Optional[str],
-    tokens_in: Optional[int],
-    tokens_out: Optional[int],
-    latency_ms: int,
-    is_retry: bool,
-):
-    """Fire-and-forget recording in background thread. Never raises."""
-    def _do_record():
-        try:
-            from .record import hash_content
-            out_text = _extract_text(out_content)
-            flags = detect_flags(out_text, is_retry=is_retry, latency_ms=latency_ms)
-
-            record = create_record(
-                agent_did=_ctx.identity["did"],
-                step_type=step_type,
-                in_content=in_content,
-                out_content=out_content,
-                identity=_ctx.identity,
-                prev_record=_ctx.last_record,
-                model=model,
-                tokens_in=tokens_in,
-                tokens_out=tokens_out,
-                latency_ms=latency_ms,
-                flags=flags,
-            )
-            save_record(record_to_dict(record))
-            with _ctx.lock:
-                _ctx.last_record = record
-        except Exception:
-            # Fail silently — recording failure NEVER affects the LLM call
-            pass
-
-    t = threading.Thread(target=_do_record, daemon=True)
-    t.start()
-
-
-def _extract_text(content) -> str:
-    """Extract plain text from various response formats."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                if item.get("type") == "text":
-                    parts.append(item.get("text", ""))
-                elif "text" in item:
-                    parts.append(item["text"])
-        return " ".join(parts)
-    if hasattr(content, "text"):
-        return content.text
-    return str(content)
+from .core import record_async
 
 
 def _wrap_anthropic(client):
@@ -102,14 +24,6 @@ def _wrap_anthropic(client):
     def recorded_create(*args, **kwargs):
         in_content = kwargs.get("messages", args[0] if args else [])
         model = kwargs.get("model", "unknown")
-
-        # Retry detection: same input hash seen before?
-        from .record import hash_content
-        in_hash = hash_content(in_content)
-        with _ctx.lock:
-            prev_count = _ctx.call_hashes.get(in_hash, 0)
-            _ctx.call_hashes[in_hash] = prev_count + 1
-        is_retry = prev_count > 0
 
         t_start = time.time()
         response = original_create(*args, **kwargs)
@@ -130,15 +44,15 @@ def _wrap_anthropic(client):
         except Exception:
             pass
 
-        _record_async(
+        # Delegate to core (handles chaining, signing, flags, retry detection)
+        record_async(
+            input_content=in_content,
+            output_content=out_content,
             step_type="llm_call",
-            in_content=in_content,
-            out_content=out_content,
             model=model,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
-            is_retry=is_retry,
         )
         return response
 
@@ -155,13 +69,6 @@ def _wrap_openai(client):
         in_content = kwargs.get("messages", [])
         model = kwargs.get("model", "unknown")
 
-        from .record import hash_content
-        in_hash = hash_content(in_content)
-        with _ctx.lock:
-            prev_count = _ctx.call_hashes.get(in_hash, 0)
-            _ctx.call_hashes[in_hash] = prev_count + 1
-        is_retry = prev_count > 0
-
         t_start = time.time()
         response = original_create(*args, **kwargs)
         latency_ms = int((time.time() - t_start) * 1000)
@@ -177,15 +84,15 @@ def _wrap_openai(client):
         except Exception:
             pass
 
-        _record_async(
+        # Delegate to core (handles chaining, signing, flags, retry detection)
+        record_async(
+            input_content=in_content,
+            output_content=out_content,
             step_type="llm_call",
-            in_content=in_content,
-            out_content=out_content,
             model=model,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
-            is_retry=is_retry,
         )
         return response
 

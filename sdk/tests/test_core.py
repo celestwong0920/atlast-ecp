@@ -20,7 +20,12 @@ def temp_ecp_dir(tmp_path, monkeypatch):
     """Each test gets a fresh .ecp/ directory."""
     monkeypatch.chdir(tmp_path)
     yield tmp_path
-    # Reset wrap context via sys.modules to avoid namespace collision
+    # Reset core state and legacy wrap context
+    try:
+        from atlast_ecp.core import reset
+        reset()
+    except Exception:
+        pass
     try:
         import sys
         import atlast_ecp.wrap  # ensure loaded
@@ -378,12 +383,12 @@ class TestMerkle:
         assert "flags" in result[0]
 
     def test_aggregate_flag_counts(self):
-        """_aggregate_flag_counts aggregates correctly."""
+        """_aggregate_flag_counts aggregates correctly with list-style flags."""
         from atlast_ecp.batch import _aggregate_flag_counts
         records = [
-            {"step": {"flags": {"hedged": True, "retried": True}}},
-            {"step": {"flags": {"hedged": True, "retried": False}}},
-            {"step": {"flags": {"hedged": False, "error": True}}},
+            {"step": {"flags": ["hedged", "retried"]}},
+            {"step": {"flags": ["hedged"]}},
+            {"step": {"flags": ["error"]}},
             {"step": {}},  # No flags key
         ]
         counts = _aggregate_flag_counts(records)
@@ -451,3 +456,85 @@ class TestChainIntegrity:
         d2["chain"]["prev"] = "rec_tampered_id_000"  # Break the chain
 
         assert _check_chain_integrity([d1, d2]) is False
+
+
+# ─── 7. Core Unified Interface ────────────────────────────────────────────────
+
+class TestCore:
+    def test_core_record_returns_id(self):
+        from atlast_ecp.core import record, reset
+        reset()
+        rid = record("hello", "world")
+        assert rid is not None
+        assert rid.startswith("rec_")
+
+    def test_core_record_creates_file(self):
+        from atlast_ecp.core import record, reset
+        from atlast_ecp.storage import load_records
+        reset()
+        record("input1", "output1")
+        records = load_records(limit=10)
+        assert len(records) >= 1
+
+    def test_core_record_chains(self):
+        from atlast_ecp.core import record, reset
+        from atlast_ecp.storage import load_records
+        reset()
+        record("a", "b")
+        record("c", "d")
+        records = load_records(limit=10)
+        # newest first
+        assert records[0]["chain"]["prev"] != "genesis"
+
+    def test_core_record_genesis_first(self):
+        from atlast_ecp.core import record, reset
+        from atlast_ecp.storage import load_records
+        reset()
+        record("first", "record")
+        records = load_records(limit=1)
+        assert records[0]["chain"]["prev"] == "genesis"
+
+    def test_core_record_detects_hedge(self):
+        import time
+        from atlast_ecp.core import record, reset
+        from atlast_ecp.storage import load_records
+        reset()
+        record("question", "I think maybe this is correct, but I'm not sure")
+        time.sleep(0.1)
+        records = load_records(limit=1)
+        assert "hedged" in records[0]["step"]["flags"]
+
+    def test_core_record_fail_open(self):
+        from atlast_ecp.core import record, reset
+        reset()
+        # Even with bad input types, should return None not raise
+        result = record(None, None)
+        # Should not raise — Fail-Open
+
+    def test_core_record_async_does_not_block(self):
+        import time
+        from atlast_ecp.core import record_async, reset
+        reset()
+        start = time.time()
+        record_async("input", "output")
+        elapsed = time.time() - start
+        assert elapsed < 0.1  # Should be near-instant
+
+    def test_core_get_identity(self):
+        from atlast_ecp.core import get_identity
+        identity = get_identity()
+        assert identity["did"].startswith("did:ecp:")
+
+    def test_core_reset(self):
+        from atlast_ecp.core import record, reset
+        from atlast_ecp.storage import load_records
+        reset()
+        record("a", "b")
+        reset()
+        record("c", "d")
+        records = load_records(limit=10)
+        # After reset, the second record should be genesis
+        # Find the record with input hash of "c"/"d"
+        # Since reset clears last_record, the new record should have prev=genesis
+        genesis_records = [r for r in records if r["chain"]["prev"] == "genesis"]
+        assert len(genesis_records) >= 2
