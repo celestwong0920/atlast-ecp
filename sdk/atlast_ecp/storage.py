@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-ECP_DIR = Path(".ecp")
+import os
+ECP_DIR = Path(os.environ.get("ATLAST_ECP_DIR", os.path.expanduser("~/.ecp")))
 RECORDS_DIR = ECP_DIR / "records"
 LOCAL_DIR = ECP_DIR / "local"       # summaries, never uploaded
 INDEX_FILE = ECP_DIR / "index.json" # record_id → file + line mapping
@@ -20,9 +21,9 @@ _lock = threading.Lock()
 
 def init_storage():
     """Create .ecp/ directory structure if not exists."""
-    ECP_DIR.mkdir(exist_ok=True)
-    RECORDS_DIR.mkdir(exist_ok=True)
-    LOCAL_DIR.mkdir(exist_ok=True)
+    ECP_DIR.mkdir(parents=True, exist_ok=True)
+    RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+    LOCAL_DIR.mkdir(parents=True, exist_ok=True)
     if not INDEX_FILE.exists():
         INDEX_FILE.write_text(json.dumps({}))
 

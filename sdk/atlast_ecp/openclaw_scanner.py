@@ -114,6 +114,23 @@ def scan_session_file(jsonl_path: str, since_ts: Optional[str] = None) -> list[d
     return interactions
 
 
+def _set_agent_ecp_dir(agent_name: str):
+    """Set ECP storage directory per agent for independent DIDs."""
+    ecp_dir = os.path.expanduser(f"~/.ecp/agents/{agent_name}")
+    os.environ["ATLAST_ECP_DIR"] = ecp_dir
+    # Reload storage paths
+    from . import storage
+    storage.ECP_DIR = Path(ecp_dir)
+    storage.RECORDS_DIR = storage.ECP_DIR / "records"
+    storage.LOCAL_DIR = storage.ECP_DIR / "local"
+    storage.INDEX_FILE = storage.ECP_DIR / "index.json"
+    storage.QUEUE_FILE = storage.ECP_DIR / "upload_queue.jsonl"
+    storage.init_storage()
+    # Also reset identity cache so each agent gets its own DID
+    from . import identity
+    identity.IDENTITY_FILE = storage.ECP_DIR / "identity.json"
+
+
 def scan_openclaw_agent(
     agent_dir: str,
     agent_name: Optional[str] = None,
@@ -135,12 +152,18 @@ def scan_openclaw_agent(
     if not agent_name:
         identity_file = agent_path / "workspace" / "IDENTITY.md"
         if identity_file.exists():
-            for line in identity_file.read_text().splitlines():
-                if "Name:" in line:
-                    agent_name = line.split("Name:")[-1].strip().strip("*")
-                    break
+            text = identity_file.read_text().replace("\\n", "\n")
+            for line in text.splitlines():
+                if "Name:" in line and "**" in line:
+                    agent_name = line.split("Name:")[-1].strip().strip("*").strip()
+                    if agent_name:
+                        break
         if not agent_name:
             agent_name = agent_path.name.replace(".openclaw-", "")
+
+    # Set per-agent ECP directory (each agent gets its own DID)
+    safe_name = agent_name.replace(" ", "-").replace("/", "-")[:50]
+    _set_agent_ecp_dir(safe_name)
 
     # State file to track what we've already scanned
     state_file = Path(os.path.expanduser("~/.ecp")) / f"openclaw_scan_{hashlib.md5(agent_dir.encode()).hexdigest()[:8]}.json"
@@ -203,15 +226,12 @@ def main():
     args = parser.parse_args()
 
     agent_dir = os.path.expanduser(args.agent_dir)
-
-    # Ensure identity exists
-    identity = get_or_create_identity()
-    print(f"ECP Agent DID: {identity['did']}")
     print(f"Scanning: {agent_dir}")
 
     while True:
         result = scan_openclaw_agent(agent_dir, agent_name=args.agent_name)
-        print(f"[{time.strftime('%H:%M:%S')}] {result['agent_name']}: {result['new_records']} new records")
+        did = get_or_create_identity()["did"]
+        print(f"[{time.strftime('%H:%M:%S')}] {result['agent_name']} ({did}): {result['new_records']} new records")
 
         if args.batch and result["new_records"] > 0:
             print("  Running batch upload...")

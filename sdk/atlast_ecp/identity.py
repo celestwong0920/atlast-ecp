@@ -23,7 +23,8 @@ except ImportError:
     HAS_CRYPTO = False
 
 
-ECP_DIR = Path(".ecp")
+import os as _os
+ECP_DIR = Path(_os.environ.get("ATLAST_ECP_DIR", _os.path.expanduser("~/.ecp")))
 IDENTITY_FILE = ECP_DIR / "identity.json"
 
 

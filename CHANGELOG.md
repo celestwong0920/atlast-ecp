@@ -2,6 +2,23 @@
 
 All notable changes to ATLAST ECP are documented in this file.
 
+## [0.5.0] - 2026-03-17
+
+### Added
+- **OpenClaw Session Scanner** (`atlast_ecp.openclaw_scanner`) — scan any OpenClaw agent's session logs into ECP records
+  - `python -m atlast_ecp.openclaw_scanner ~/.openclaw-my-agent --batch`
+  - `--watch` mode for continuous monitoring
+  - Incremental scanning (no duplicates)
+- **Per-agent DID** — each OpenClaw agent gets its own identity (`~/.ecp/agents/<name>/`)
+- **`ATLAST_ECP_DIR` env var** — override ECP storage directory
+- **EAS on-chain attestations** — live on Base Sepolia via web3.py
+- **Backend rate limiting** — 30/min batch, 10/min register, 20/min certificate
+
+### Fixed
+- EAS Schema registration ABI encoding (switched to web3.py)
+- Certificate `cert_id` column length (20→30)
+- `ECP_DIR` now defaults to `~/.ecp` (home dir) instead of relative `.ecp/`
+
 ## [0.4.0] - 2026-03-16
 
 ### Added

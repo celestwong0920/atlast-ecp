@@ -31,7 +31,7 @@ BATCH_STATE_FILE = ECP_DIR / "batch_state.json"
 import os as _os
 ATLAST_API = _os.environ.get(
     "ATLAST_API_URL",
-    "https://llachat-backend-production.up.railway.app/v1"
+    "https://api.llachat.com/v1"
 )
 
 _batch_timer: Optional[threading.Timer] = None

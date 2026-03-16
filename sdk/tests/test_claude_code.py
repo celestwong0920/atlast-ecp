@@ -25,6 +25,19 @@ sys.path.insert(0, INTEGRATIONS_DIR)
 @pytest.fixture(autouse=True)
 def temp_ecp_dir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # Set ECP dir to temp path
+    ecp_dir = str(tmp_path / ".ecp")
+    monkeypatch.setenv("ATLAST_ECP_DIR", ecp_dir)
+    import atlast_ecp.storage as _storage
+    import atlast_ecp.identity as _identity
+    from pathlib import Path
+    _storage.ECP_DIR = Path(ecp_dir)
+    _storage.RECORDS_DIR = _storage.ECP_DIR / "records"
+    _storage.LOCAL_DIR = _storage.ECP_DIR / "local"
+    _storage.INDEX_FILE = _storage.ECP_DIR / "index.json"
+    _storage.QUEUE_FILE = _storage.ECP_DIR / "upload_queue.jsonl"
+    _identity.ECP_DIR = Path(ecp_dir)
+    _identity.IDENTITY_FILE = _identity.ECP_DIR / "identity.json"
     # Reset core state (hooks now delegate to core)
     from atlast_ecp.core import reset
     reset()
