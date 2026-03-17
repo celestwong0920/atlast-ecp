@@ -52,10 +52,16 @@ export async function uploadBatch(config: ATLASTConfig): Promise<BatchUploadResp
     })),
   };
 
-  const apiUrl = config.apiUrl || DEFAULT_API_URL;
-  const resp = await fetch(`${apiUrl}/v1/batch`, {
+  const apiUrl = config.apiUrl || process.env.ATLAST_API_URL || DEFAULT_API_URL;
+  const apiKey = config.apiKey || process.env.ATLAST_API_KEY;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) {
+    headers['X-Agent-Key'] = apiKey;
+  }
+
+  const resp = await fetch(`${apiUrl}/v1/batches`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   });
 

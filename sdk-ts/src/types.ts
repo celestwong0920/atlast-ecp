@@ -56,9 +56,16 @@ export interface BatchUploadResponse {
 
 export interface ATLASTConfig {
   apiUrl?: string;
+  apiKey?: string;
   ecpDir?: string;
   agentId: string;
   autoUpload?: boolean;
   batchSize?: number;
   flushIntervalMs?: number;
+}
+
+export interface LocalConfig {
+  agent_did?: string;
+  agent_api_key?: string;
+  endpoint?: string;
 }

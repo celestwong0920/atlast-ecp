@@ -36,4 +36,7 @@ export { track } from './track';
 export type { TrackOptions } from './track';
 
 // Crypto utilities
-export { sha256, hashRecord, buildMerkleRoot, generateDID } from './crypto';
+export { sha256, hashRecord, buildMerkleRoot, generateDID, verifySignature } from './crypto';
+
+// Re-export LocalConfig type
+export type { LocalConfig } from './types';
