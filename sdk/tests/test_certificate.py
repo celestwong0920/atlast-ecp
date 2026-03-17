@@ -58,6 +58,6 @@ class TestCertifyMCP:
         # Either has cert_id (success) or error (backend not available)
         assert "cert_id" in result or "error" in result
 
-    def test_mcp_has_5_tools(self):
+    def test_mcp_has_tools(self):
         from atlast_ecp.mcp_server import _get_tools
-        assert len(_get_tools()) == 5
+        assert len(_get_tools()) == 8  # verify, profile, did, certify, recent, record, flush, stats
