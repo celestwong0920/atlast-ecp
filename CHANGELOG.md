@@ -38,6 +38,18 @@ All notable changes to ATLAST ECP are documented in this file.
 - `canonicalJSON()` recursive sort for cross-SDK hash consistency
 - Plugin batch uploader error handling
 
+## [0.6.1] - 2026-03-18
+
+### Added
+- **LangChain Callback Handler** (`atlast_ecp.adapters.langchain`) — one-line integration
+  - Captures: LLM calls, chat model calls, tool calls, retriever queries, errors
+  - Tracks model name, token counts, latency; supports concurrent runs
+- **CrewAI Callback** (`atlast_ecp.adapters.crewai`) — one-line integration
+  - Captures: task completions, agent steps, tool calls
+  - Supports both `callbacks=[...]` and `step_callback=` modes
+- **TypeScript SDK README** rewritten with complete API reference
+- 21 new adapter tests
+
 ## [0.6.0] - 2026-03-18
 
 ### Added
