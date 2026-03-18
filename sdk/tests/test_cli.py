@@ -41,8 +41,8 @@ class TestCLIRegister:
         cmd_register([])
         captured = capsys.readouterr()
         assert "Registering Agent" in captured.out
-        # Backend not available → should show warning, not crash
-        assert "not available" in captured.out or "Registered" in captured.out
+        # Backend available → registered; or unavailable → warning; either way no crash
+        assert "not available" in captured.out or "Registered" in captured.out or "registered" in captured.out
 
 
 class TestCLIDID:

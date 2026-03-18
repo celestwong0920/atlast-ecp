@@ -500,6 +500,12 @@ def cmd_run(args: list[str]):
         sys.exit(1)
 
 
+def _cmd_insights(args: list[str]):
+    """atlast insights [--json] [--top N] [--limit N] — analyze ECP records"""
+    from .insights import cmd_insights
+    cmd_insights(args)
+
+
 def cmd_export(args: list[str]):
     """atlast export [--format json] — export ECP records"""
     import json as _json
@@ -532,6 +538,7 @@ def main():
         print("    atlast run <cmd>         Run command with proxy auto-injected")
         print()
         print("  Analysis:")
+        print("    atlast insights          Analyze records (latency, errors, models)")
         print("    atlast verify <id>       Verify record integrity")
         print("    atlast stats             Show trust signals")
         print("    atlast did               Show agent DID")
@@ -563,6 +570,7 @@ def main():
         "register": cmd_register,
         "certify": cmd_certify,
         "export": cmd_export,
+        "insights": _cmd_insights,
     }
 
     if cmd in commands:
