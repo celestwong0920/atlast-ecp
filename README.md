@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://weba0.com">Website</a> · <a href="ECP-SPEC.md">ECP Spec</a> · <a href="docs/compliance/AI-COMPLIANCE-GUIDE.md">Compliance Guide</a> · <a href="CONTRIBUTING.md">Contributing</a> · <a href="https://pypi.org/project/atlast-ecp/">PyPI</a>
+  <a href="https://weba0.com">Website</a> · <a href="ECP-SPEC.md">ECP Spec</a> · <a href="docs/compliance/AI-COMPLIANCE-GUIDE.md">Compliance Guide</a> · <a href="CONTRIBUTING.md">Contributing</a> · <a href="https://pypi.org/project/atlast-ecp/">PyPI</a> · <a href="README.zh-CN.md">中文文档</a>
 </p>
 
 ---
@@ -41,16 +41,48 @@ ATLAST Protocol
 
 ## The Problem
 
-The AI agent market is exploding. But **three critical problems** remain unsolved:
+AI agents are no longer tools you click — they are **autonomous actors** that write code, manage money, negotiate contracts, and make decisions on your behalf. The agent economy is here. But ask yourself:
 
-### 🔴 No Verifiable Record
-Your agent made 500 decisions today. Something went wrong. What did it actually do? Logs exist — but logs are **deletable, editable, never evidence**. There is no immutable audit trail.
+### 🔴 Problem 1: Your Agent Works in the Dark
 
-### 🔴 No Trust Across Agents
-In multi-agent systems (CrewAI, AutoGen, LangGraph), Agent A passes data to Agent B. How do you verify B received exactly what A sent? **Nobody can prove data integrity across agent handoffs.** This is the blind spot of every monitoring tool.
+Your agent made 500 decisions today. A client complains. A transaction fails. A contract is wrong.
 
-### 🔴 No Universal Standard
-LangSmith monitors LangChain agents. Arize monitors ML models. Every tool is siloed. There is **no open standard** that works across all frameworks, all languages, all providers — the way HTTP works for the web.
+**What did your agent actually do?**
+
+You check the logs. But logs are deletable. Editable. Written by the same system that made the mistake. **Logs are not evidence.** In court, in compliance, in any dispute — your agent's work history is worth nothing. It's as if your employee worked an entire year with no records, no receipts, no paper trail.
+
+> *Would you trust an employee who refuses to keep records of their work?*
+> *Then why do you trust an agent that can't?*
+
+### 🔴 Problem 2: Multi-Agent = Multi-Risk, Zero Accountability
+
+You deploy a CrewAI pipeline: Researcher → Analyst → Writer. The final report contains fabricated data. **Which agent is responsible?**
+
+Today, you cannot answer this question. Agent A says it sent the right data. Agent B says it received garbage. There is **no way to verify who is telling the truth** — because there is no cryptographic proof of what was passed between them.
+
+In a world moving toward 10-agent, 50-agent, 100-agent orchestrations, this is not a minor inconvenience. **This is the single biggest barrier to enterprise adoption of multi-agent systems.**
+
+> *Every supply chain has receipts. Every bank transfer has a record. But when Agent A hands off to Agent B — nothing. The most critical handoff in AI has zero verification.*
+
+### 🔴 Problem 3: Your Agent's Reputation Belongs to Someone Else
+
+Your agent completed 10,000 tasks flawlessly over 6 months. That track record is worth something — it's proof of competence, reliability, trust.
+
+But where does that reputation live? **On someone else's platform.** When they change their terms, shut down, or get acquired — your agent's entire proof of work **disappears**. You built it. They own it.
+
+There is no portable, verifiable, agent-owned proof of work. No "résumé" that belongs to the agent itself.
+
+> *Imagine if your LinkedIn profile was deleted every time you changed jobs. That's the reality for every AI agent today.*
+
+### 🔴 Problem 4: Regulators Are Coming, and You Have No Answer
+
+The EU AI Act takes effect in 2027. China's GenAI regulations are already enforced. Every major economy is writing AI accountability laws.
+
+They will ask: **"Show me what your AI agent did, when, and why."**
+
+Today, you have nothing to show them. No standard format. No verifiable chain. No audit trail that a regulator would accept. You are running autonomous AI systems with **zero compliance infrastructure**.
+
+> *HTTP didn't wait for governments to mandate web security. HTTPS became the standard because the market needed trust. The agent economy needs the same thing — now, before the mandates arrive.*
 
 ---
 
@@ -71,19 +103,9 @@ LangSmith monitors LangChain agents. Arize monitors ML models. Every tool is sil
 
 ### How It Works
 
-```
-Your Agent                    ECP Layer                     Local Storage
-    │                            │                              │
-    ├── LLM API call ──────────► │                              │
-    │                            ├── SHA-256(input)             │
-    │                            ├── SHA-256(output)            │
-    │                            ├── Detect behavioral flags    │
-    │   ◄── Response (unchanged) ├── Chain to previous record   │
-    │                            ├── Save ECP record ──────────►│ ~/.atlast/records.jsonl
-    │                            │                              │
-    │                            │    Content stays here.       │
-    │                            │    Only hashes are recorded.  │
-```
+<p align="center">
+  <img src="assets/how-it-works.svg" alt="How ECP Works" width="100%">
+</p>
 
 ### ECP Record (5 Progressive Levels)
 
@@ -221,34 +243,9 @@ atlast verify --a2a researcher.jsonl analyst.jsonl writer.jsonl
 
 ## Ecosystem
 
-```
-┌─────────────────────────────────────────────────────┐
-│                  ATLAST Protocol                     │
-│                                                     │
-│  ┌──────────┐ ┌──────────┐ ┌──────┐ ┌───────────┐  │
-│  │ Python   │ │ TypeScript│ │ Go   │ │ Reference │  │
-│  │ SDK      │ │ SDK      │ │ SDK  │ │ Server    │  │
-│  │ PyPI     │ │ npm      │ │      │ │ FastAPI   │  │
-│  └──────────┘ └──────────┘ └──────┘ └───────────┘  │
-│                                                     │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐            │
-│  │ CLI      │ │ Proxy    │ │ Adapters │            │
-│  │ atlast   │ │ Zero-code│ │ LangChain│            │
-│  │          │ │          │ │ CrewAI   │            │
-│  └──────────┘ └──────────┘ └──────────┘            │
-│                                                     │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐            │
-│  │ MCP      │ │ OpenClaw │ │ OTel     │            │
-│  │ Server   │ │ Plugin   │ │ Exporter │            │
-│  └──────────┘ └──────────┘ └──────────┘            │
-└─────────────────────────────────────────────────────┘
-          │                          │
-          ▼                          ▼
-   ┌─────────────┐          ┌──────────────┐
-   │ Self-hosted │          │  LLaChat.com │
-   │ ECP Server  │          │  (optional)  │
-   └─────────────┘          └──────────────┘
-```
+<p align="center">
+  <img src="assets/ecosystem.svg" alt="ATLAST Ecosystem" width="100%">
+</p>
 
 ### SDKs
 - **[Python SDK](sdk/)** — `pip install atlast-ecp` — 19 modules, 387 tests
