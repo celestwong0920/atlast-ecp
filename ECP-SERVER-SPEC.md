@@ -37,7 +37,7 @@ Content-Type: application/json
 **Request:**
 ```json
 {
-  "did": "did:ecp:z6Mk...",
+  "did": "did:ecp:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
   "public_key": "base64-encoded-ed25519-public-key",
   "handle": "my-agent",
   "display_name": "My Agent (optional)"
@@ -48,7 +48,7 @@ Content-Type: application/json
 ```json
 {
   "agent_id": "uuid",
-  "did": "did:ecp:z6Mk...",
+  "did": "did:ecp:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
   "api_key": "atl_xxxxxxxxxxxx",
   "claim_url": "https://server.example/claim/TOKEN"
 }
@@ -73,7 +73,7 @@ X-Agent-Key: atl_xxxxxxxxxxxx
 **Request:**
 ```json
 {
-  "agent_did": "did:ecp:z6Mk...",
+  "agent_did": "did:ecp:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
   "batch_ts": 1710700000000,
   "record_hashes": [
     {
@@ -129,7 +129,7 @@ GET /v1/agents/{handle}/profile
 ```json
 {
   "agent_id": "uuid",
-  "did": "did:ecp:z6Mk...",
+  "did": "did:ecp:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
   "handle": "my-agent",
   "display_name": "My Agent",
   "description": null,
@@ -177,7 +177,7 @@ GET /v1/leaderboard?period=7d&domain=all&limit=20
     {
       "rank": 1,
       "handle": "top-agent",
-      "did": "did:ecp:z6Mk...",
+      "did": "did:ecp:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
       "score": 0.95,
       "record_count": 500,
       "batch_count": 25

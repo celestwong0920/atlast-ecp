@@ -1,10 +1,14 @@
 """
 ECP Reference Server — Merkle Tree Verification
 
-Algorithm matches SDK verify.py build_merkle_root() exactly:
-1. Sort hashes lexicographically
-2. Pair adjacent hashes, SHA-256 each pair
-3. Repeat until one root remains
+Algorithm matches SDK batch.py build_merkle_tree() exactly:
+1. Keep original hash order (NO sorting — order-preserving)
+2. Pad odd-length layers by duplicating last element
+3. Pair adjacent hashes, SHA-256(concat) each pair
+4. Repeat until one root remains
+
+IMPORTANT: Do NOT sort hashes. SDK builds Merkle tree in insertion order.
+Sorting would produce a different root, breaking verification.
 """
 
 from __future__ import annotations
@@ -19,16 +23,16 @@ def build_merkle_root(hashes: list[str]) -> str:
     if len(hashes) == 1:
         return hashes[0]
 
-    # Sort lexicographically
-    layer = sorted(hashes)
+    # Keep original order — must match SDK batch.py exactly
+    layer = list(hashes)
 
     while len(layer) > 1:
+        # Pad odd-length layer by duplicating last element (matches SDK)
+        if len(layer) % 2 == 1:
+            layer.append(layer[-1])
         next_layer = []
         for i in range(0, len(layer), 2):
-            if i + 1 < len(layer):
-                combined = layer[i] + layer[i + 1]
-            else:
-                combined = layer[i] + layer[i]  # duplicate odd element
+            combined = layer[i] + layer[i + 1]
             h = hashlib.sha256(combined.encode()).hexdigest()
             next_layer.append(f"sha256:{h}")
         layer = next_layer

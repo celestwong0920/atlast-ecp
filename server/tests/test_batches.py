@@ -74,3 +74,41 @@ def test_profile_after_batch(client, registered_agent):
     assert data["total_records"] == 3
     assert data["total_batches"] == 1
     assert data["trust_signals"]["reliability"] == 1.0
+
+
+def test_merkle_cross_sdk_consistency():
+    """BUG-1 regression: Server merkle must match SDK batch.py merkle (no sorting)."""
+    from server.merkle import build_merkle_root
+    from atlast_ecp.batch import build_merkle_tree
+
+    # Deliberately unsorted hashes
+    hashes = [
+        "sha256:cccc",
+        "sha256:aaaa",
+        "sha256:bbbb",
+    ]
+    sdk_root, _ = build_merkle_tree(hashes)
+    server_root = build_merkle_root(hashes)
+    assert sdk_root == server_root, f"SDK={sdk_root} != Server={server_root}"
+
+
+def test_merkle_cross_sdk_single():
+    """Single hash should return same root in both SDK and Server."""
+    from server.merkle import build_merkle_root
+    from atlast_ecp.batch import build_merkle_tree
+
+    hashes = ["sha256:deadbeef"]
+    sdk_root, _ = build_merkle_tree(hashes)
+    server_root = build_merkle_root(hashes)
+    assert sdk_root == server_root
+
+
+def test_merkle_cross_sdk_even():
+    """Even number of hashes — cross-SDK consistency."""
+    from server.merkle import build_merkle_root
+    from atlast_ecp.batch import build_merkle_tree
+
+    hashes = ["sha256:dddd", "sha256:bbbb", "sha256:aaaa", "sha256:cccc"]
+    sdk_root, _ = build_merkle_tree(hashes)
+    server_root = build_merkle_root(hashes)
+    assert sdk_root == server_root
