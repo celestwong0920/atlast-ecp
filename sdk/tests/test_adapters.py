@@ -347,3 +347,124 @@ class TestCrewAIAdapter:
 
         captured = capsys.readouterr()
         assert "[ATLAST ECP]" in captured.out
+
+
+# ── P3-5: AutoGen Adapter Tests ──────────────────────────────────────────
+
+
+class TestAutoGenAdapter:
+    """Tests for AutoGen adapter — mocked, no autogen dependency needed."""
+
+    def test_import_without_autogen(self):
+        """Importing adapter without autogen installed should not raise."""
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware, HAS_AUTOGEN
+        # HAS_AUTOGEN might be True or False depending on env
+        assert ATLASTAutoGenMiddleware is not None
+
+    def test_middleware_creation(self):
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+        mw = ATLASTAutoGenMiddleware(agent_id="test-agent")
+        assert mw.agent_id == "test-agent"
+        assert mw.records == []
+
+    def test_create_record(self):
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+        mw = ATLASTAutoGenMiddleware(agent_id="test-agent")
+        rec = mw._create_record(
+            action="autogen_reply",
+            input_text="hello",
+            output_text="world",
+            duration_ms=100,
+        )
+        assert rec.get("ecp") == "1.0"
+        assert rec.get("agent") == "test-agent"
+        assert rec.get("action") == "autogen_reply"
+        assert "in_hash" in rec
+        assert "out_hash" in rec
+        assert len(mw.records) == 1
+
+    def test_wrap_mock_agent(self):
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+
+        class MockAgent:
+            name = "mock-agent"
+            def generate_reply(self, messages=None, sender=None, **kwargs):
+                return "I am a mock response"
+
+        agent = MockAgent()
+        mw = ATLASTAutoGenMiddleware(agent_id="mock-agent")
+        mw.wrap(agent)
+
+        result = agent.generate_reply(messages=[{"content": "hello"}])
+        assert result == "I am a mock response"
+        assert len(mw.records) == 1
+        assert mw.records[0]["action"] == "autogen_reply"
+
+    def test_handoff_detection(self):
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+
+        class MockAgent:
+            name = "agent-b"
+            def generate_reply(self, messages=None, sender=None, **kwargs):
+                return "response from B"
+
+        class MockSender:
+            name = "agent-a"
+
+        agent = MockAgent()
+        sender = MockSender()
+        mw = ATLASTAutoGenMiddleware(agent_id="agent-b")
+        mw.wrap(agent)
+
+        result = agent.generate_reply(messages=[{"content": "hi"}], sender=sender)
+        assert result == "response from B"
+        assert len(mw.records) == 1
+        assert mw.records[0]["action"] == "autogen_handoff"
+        assert mw.records[0]["meta"]["handoff"] is True
+        assert mw.records[0]["meta"]["source_agent"] == "agent-a"
+        assert mw.records[0]["meta"]["target_agent"] == "agent-b"
+
+    def test_register_atlast(self):
+        from atlast_ecp.adapters.autogen import register_atlast
+
+        class MockAgent:
+            name = "my-agent"
+            def generate_reply(self, messages=None, sender=None, **kwargs):
+                return "hi"
+
+        agent = MockAgent()
+        mw = register_atlast(agent)
+        agent.generate_reply(messages=[{"content": "test"}])
+        assert len(mw.records) == 1
+
+    def test_record_has_required_fields(self):
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+
+        class MockAgent:
+            name = "test"
+            def generate_reply(self, messages=None, sender=None, **kwargs):
+                return "ok"
+
+        agent = MockAgent()
+        mw = ATLASTAutoGenMiddleware(agent_id="test")
+        mw.wrap(agent)
+        agent.generate_reply(messages=[{"content": "x"}])
+
+        rec = mw.records[0]
+        required = {"ecp", "id", "ts", "agent", "action", "in_hash", "out_hash"}
+        assert required.issubset(set(rec.keys())), f"Missing: {required - set(rec.keys())}"
+
+    def test_fail_open(self):
+        """Adapter should never crash even with weird inputs."""
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+
+        class MockAgent:
+            name = "test"
+            def generate_reply(self, messages=None, sender=None, **kwargs):
+                return None  # weird output
+
+        agent = MockAgent()
+        mw = ATLASTAutoGenMiddleware(agent_id="test")
+        mw.wrap(agent)
+        result = agent.generate_reply()  # no messages
+        assert result is None  # should not crash

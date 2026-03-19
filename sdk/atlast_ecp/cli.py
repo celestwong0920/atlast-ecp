@@ -590,6 +590,103 @@ def cmd_export(args: list[str]):
     print(output)
 
 
+def _cmd_config(args: list[str]):
+    """atlast config get|set <key> [value] — manage ~/.atlast/config.json"""
+    from .config import load_config, save_config
+
+    if not args:
+        print("Usage:")
+        print("  atlast config get              Show all config")
+        print("  atlast config set <key> <val>  Set a config value")
+        print("  atlast config get <key>        Get a specific value")
+        print("\nKeys: endpoint, api_key, agent_did, webhook_url, webhook_token")
+        return
+
+    sub = args[0]
+    if sub == "get":
+        cfg = load_config()
+        if len(args) >= 2:
+            key = args[1]
+            val = cfg.get(key)
+            if val is not None:
+                # Mask sensitive values
+                if "token" in key or "key" in key:
+                    val = val[:8] + "..." + val[-4:] if len(val) > 12 else "***"
+                print(f"{key} = {val}")
+            else:
+                print(f"{key}: not set")
+        else:
+            if not cfg:
+                print("No config found. Run 'atlast init' or 'atlast config set <key> <val>'")
+                return
+            for k, v in cfg.items():
+                display = v
+                if ("token" in k or "key" in k) and isinstance(v, str) and len(v) > 12:
+                    display = v[:8] + "..." + v[-4:]
+                print(f"  {k} = {display}")
+    elif sub == "set":
+        if len(args) < 3:
+            print("Usage: atlast config set <key> <value>")
+            sys.exit(1)
+        key, value = args[1], args[2]
+        save_config({key: value})
+        print(f"✅ {key} saved to ~/.atlast/config.json")
+    else:
+        print(f"Unknown config subcommand: {sub}")
+        sys.exit(1)
+
+
+def _cmd_discover(args: list[str]):
+    """atlast discover <url> — discover ECP server capabilities"""
+    import urllib.request
+    import urllib.error
+
+    if not args:
+        print("Usage: atlast discover <server-url>")
+        print("Example: atlast discover http://localhost:8900")
+        return
+
+    base_url = args[0].rstrip("/")
+    url = f"{base_url}/.well-known/ecp.json"
+
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        print(f"❌ Server returned HTTP {e.code}: {url}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Could not reach server: {e}")
+        sys.exit(1)
+
+    print(f"\n🔍 ECP Server Discovery: {base_url}")
+    print("=" * 50)
+    print(f"  ECP Version:    {data.get('ecp_version', '?')}")
+    print(f"  Server Version: {data.get('server_version', '?')}")
+    print(f"  Server Name:    {data.get('server_name', '?')}")
+
+    caps = data.get("capabilities", [])
+    if caps:
+        print(f"\n  Capabilities: {', '.join(caps)}")
+
+    endpoints = data.get("endpoints", [])
+    if endpoints:
+        print(f"\n  Endpoints ({len(endpoints)}):")
+        for ep in endpoints:
+            print(f"    {ep.get('method', '?'):6s} {ep.get('path', '?')}")
+
+    auth = data.get("auth_methods", [])
+    if auth:
+        print(f"\n  Auth: {', '.join(auth)}")
+
+    chain = data.get("chain")
+    if chain:
+        print(f"\n  Chain: {chain}")
+
+    print()
+
+
 def main():
     args = sys.argv[1:]
     if not args:
@@ -605,6 +702,7 @@ def main():
         print()
         print("  Analysis:")
         print("    atlast insights          Analyze records (latency, errors, models)")
+        print("    atlast insights --section performance|trends|tools")
         print("    atlast verify <id>       Verify record integrity")
         print("    atlast stats             Show trust signals")
         print("    atlast did               Show agent DID")
@@ -614,6 +712,11 @@ def main():
         print("    atlast push              Upload records to ECP server")
         print("    atlast certify <title>   Issue a work certificate")
         print("    atlast export            Export records as JSON")
+        print()
+        print("  Configuration:")
+        print("    atlast config get        Show current config")
+        print("    atlast config set <k> <v>  Set config value")
+        print("    atlast discover <url>    Discover ECP server capabilities")
         print()
         print("  Docs: https://github.com/willau95/atlast-ecp")
         return
@@ -637,6 +740,8 @@ def main():
         "certify": cmd_certify,
         "export": cmd_export,
         "insights": _cmd_insights,
+        "config": _cmd_config,
+        "discover": _cmd_discover,
     }
 
     if cmd in commands:

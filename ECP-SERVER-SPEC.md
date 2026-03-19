@@ -1,4 +1,4 @@
-# ECP Server Specification v1.0
+# ECP Server Specification v1.1
 
 > Minimal API specification for an ECP-compatible server.
 > Any backend implementing these 4 endpoints can receive, store, and serve ECP records.
@@ -267,3 +267,200 @@ Optional enhancements:
 ---
 
 *ECP Server Spec v1.0 — ATLAST Protocol Working Group — 2026-03-18*
+
+---
+
+## 5. Insights Endpoints (v1.1)
+
+### GET /v1/insights/performance
+
+Returns latency, throughput, success rate, and per-model breakdown.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_did` | string | (all) | Filter by agent DID |
+| `limit` | int | 10000 | Max records to analyze |
+
+**Response (200):**
+```json
+{
+  "total_records": 42,
+  "avg_latency_ms": 650,
+  "p50_latency_ms": 500,
+  "p95_latency_ms": 1200,
+  "max_latency_ms": 3000,
+  "success_rate": 0.95,
+  "throughput_per_min": 12.5,
+  "by_model": {
+    "gpt-4": {"count": 30, "avg_ms": 700, "p95_ms": 1500, "max_ms": 3000}
+  }
+}
+```
+
+### GET /v1/insights/trends
+
+Time-series trend data bucketed by day or hour.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_did` | string | (all) | Filter by agent DID |
+| `bucket` | string | "day" | "day" or "hour" |
+
+**Response (200):**
+```json
+{
+  "bucket_size": "day",
+  "buckets": [
+    {"period": "2026-03-20", "record_count": 15, "avg_latency_ms": 500, "error_count": 1}
+  ]
+}
+```
+
+### GET /v1/insights/tools
+
+Tool usage distribution and performance.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_did` | string | (all) | Filter by agent DID |
+| `top_n` | int | 10 | Max tools to return |
+
+**Response (200):**
+```json
+{
+  "total_tool_calls": 25,
+  "tools": [
+    {"name": "web_search", "count": 15, "avg_duration_ms": 800, "error_rate": 0.02}
+  ]
+}
+```
+
+---
+
+## 6. Batch Detail Endpoint (v1.1)
+
+### GET /v1/batches/{batch_id}
+
+Returns batch metadata plus all record hashes.
+
+**Response (200):**
+```json
+{
+  "batch_id": "uuid",
+  "agent_id": "uuid",
+  "batch_ts": 1710000000,
+  "merkle_root": "sha256:...",
+  "record_count": 5,
+  "flag_counts": {"error": 1},
+  "records": [
+    {"record_id": "rec_01", "chain_hash": "sha256:...", "step_type": "llm_call", "ts": 1710000000}
+  ]
+}
+```
+
+---
+
+## 7. Paginated Batch Listing (v1.1)
+
+### GET /v1/agents/{handle}/batches
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | int | 1 | Page number (1-indexed) |
+| `limit` | int | 20 | Items per page (max 100) |
+
+**Response (200):**
+```json
+{
+  "total": 42,
+  "page": 1,
+  "limit": 20,
+  "items": [
+    {"id": "uuid", "batch_ts": 1710000000, "merkle_root": "sha256:...", "record_count": 5}
+  ]
+}
+```
+
+---
+
+## 8. Handoffs Endpoint (v1.1)
+
+### GET /v1/agents/{handle}/handoffs
+
+Returns A2A handoff records involving this agent.
+
+**Response (200):**
+```json
+[
+  {
+    "source_agent": "did:ecp:aaa",
+    "source_record_id": "rec_01",
+    "target_agent": "did:ecp:bbb",
+    "target_record_id": "rec_02",
+    "hash_value": "sha256:...",
+    "source_ts": 1710000000,
+    "target_ts": 1710000100,
+    "valid": true,
+    "source_batch_id": "uuid",
+    "target_batch_id": "uuid"
+  }
+]
+```
+
+---
+
+## 9. Discovery Endpoint (v1.1)
+
+### GET /.well-known/ecp.json
+
+Server capability discovery per RFC 8615.
+
+**Response (200):**
+```json
+{
+  "ecp_version": "1.0",
+  "server_version": "0.7.0",
+  "server_name": "ATLAST Reference ECP Server",
+  "endpoints": [
+    {"path": "/v1/agents/register", "method": "POST"},
+    {"path": "/v1/batches", "method": "POST"},
+    {"path": "/v1/batches/{batch_id}", "method": "GET"},
+    {"path": "/v1/agents/{handle}/profile", "method": "GET"},
+    {"path": "/v1/agents/{handle}/batches", "method": "GET"},
+    {"path": "/v1/agents/{handle}/handoffs", "method": "GET"},
+    {"path": "/v1/leaderboard", "method": "GET"},
+    {"path": "/v1/insights/performance", "method": "GET"},
+    {"path": "/v1/insights/trends", "method": "GET"},
+    {"path": "/v1/insights/tools", "method": "GET"}
+  ],
+  "capabilities": ["batch", "profile", "leaderboard", "insights", "handoffs", "discovery"],
+  "auth_methods": ["X-Agent-Key"],
+  "chain": null
+}
+```
+
+**Notes:**
+- `chain` is `null` for servers without on-chain anchoring. If supported: `{"chain_id": 84532, "eas_contract": "0x4200..."}`
+- `capabilities` dynamically reflects enabled features
+
+---
+
+## 10. Webhook Configuration (v1.1)
+
+Servers can fire webhooks after batch operations. Payload format is defined in `CERTIFICATE-SCHEMA.md` Section 3.
+
+**Configuration:**
+- Environment: `ECP_WEBHOOK_URL`, `ECP_WEBHOOK_TOKEN`
+- Config file: `~/.atlast/config.json` → `webhook_url`, `webhook_token`
+- CLI: `atlast config set webhook_url https://...`
+
+**Behavior:**
+- Webhook fires after successful batch creation
+- Fail-open: webhook errors never block the batch response
+- Retry: 1 retry on 5xx, no retry on 4xx
+- Timeout: 5 seconds
+- Auth: `X-ECP-Webhook-Token` header

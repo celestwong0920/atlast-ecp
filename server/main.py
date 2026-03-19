@@ -55,6 +55,31 @@ app.include_router(leaderboard_router)
 app.include_router(insights_router)
 
 
+@app.get("/.well-known/ecp.json")
+def discovery():
+    """ECP Server discovery endpoint (RFC 8615)."""
+    return {
+        "ecp_version": "1.0",
+        "server_version": "0.7.0",
+        "server_name": "ATLAST Reference ECP Server",
+        "endpoints": [
+            {"path": "/v1/agents/register", "method": "POST"},
+            {"path": "/v1/batches", "method": "POST"},
+            {"path": "/v1/batches/{batch_id}", "method": "GET"},
+            {"path": "/v1/agents/{handle}/profile", "method": "GET"},
+            {"path": "/v1/agents/{handle}/batches", "method": "GET"},
+            {"path": "/v1/agents/{handle}/handoffs", "method": "GET"},
+            {"path": "/v1/leaderboard", "method": "GET"},
+            {"path": "/v1/insights/performance", "method": "GET"},
+            {"path": "/v1/insights/trends", "method": "GET"},
+            {"path": "/v1/insights/tools", "method": "GET"},
+        ],
+        "capabilities": ["batch", "profile", "leaderboard", "insights", "handoffs", "discovery"],
+        "auth_methods": ["X-Agent-Key"],
+        "chain": None,
+    }
+
+
 @app.get("/health", response_model=HealthResponse)
 def health():
     return HealthResponse()

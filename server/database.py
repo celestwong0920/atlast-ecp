@@ -230,6 +230,89 @@ def get_agent_stats(agent_id: str) -> dict:
     }
 
 
+# ─── Pagination & Detail (P3-2) ───
+
+
+def get_batches_paginated(agent_id: str, page: int = 1, limit: int = 20) -> tuple[list[dict], int]:
+    """Return paginated batches for an agent. Returns (items, total)."""
+    conn = get_db()
+    offset = (page - 1) * limit
+
+    total_row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM batches WHERE agent_id = ?", (agent_id,)
+    ).fetchone()
+    total = total_row["cnt"]
+
+    rows = conn.execute(
+        """SELECT id, batch_ts, merkle_root, record_count, flag_counts, created_at
+           FROM batches WHERE agent_id = ?
+           ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+        (agent_id, limit, offset),
+    ).fetchall()
+
+    items = []
+    for row in rows:
+        item = dict(row)
+        if item.get("flag_counts"):
+            item["flag_counts"] = json.loads(item["flag_counts"])
+        items.append(item)
+
+    return items, total
+
+
+def get_batch_with_records(batch_id: str) -> Optional[dict]:
+    """Get batch metadata + all record hashes."""
+    conn = get_db()
+    batch = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
+    if not batch:
+        return None
+
+    records = conn.execute(
+        """SELECT record_id, chain_hash, step_type, ts, flags, latency_ms, model
+           FROM record_hashes WHERE batch_id = ? ORDER BY ts""",
+        (batch_id,),
+    ).fetchall()
+
+    result = dict(batch)
+    if result.get("flag_counts"):
+        result["flag_counts"] = json.loads(result["flag_counts"])
+    result["records"] = [dict(r) for r in records]
+    return result
+
+
+def get_handoffs_by_agent(agent_did: str) -> list[dict]:
+    """
+    Find A2A handoffs: where one agent's out_hash matches another agent's in_hash.
+    Since record_hashes table stores chain_hash (not separate in/out), we match
+    chain_hash across different agents' batches.
+    """
+    conn = get_db()
+    # Find records where chain_hash from this agent appears in another agent's records
+    rows = conn.execute(
+        """SELECT
+             rh1.record_id as source_record_id,
+             a1.did as source_agent,
+             rh1.ts as source_ts,
+             b1.id as source_batch_id,
+             rh2.record_id as target_record_id,
+             a2.did as target_agent,
+             rh2.ts as target_ts,
+             b2.id as target_batch_id,
+             rh1.chain_hash as hash_value
+           FROM record_hashes rh1
+           JOIN batches b1 ON rh1.batch_id = b1.id
+           JOIN agents a1 ON b1.agent_id = a1.id
+           JOIN record_hashes rh2 ON rh1.chain_hash = rh2.chain_hash AND rh1.id != rh2.id
+           JOIN batches b2 ON rh2.batch_id = b2.id
+           JOIN agents a2 ON b2.agent_id = a2.id
+           WHERE (a1.did = ? OR a2.did = ?) AND a1.id != a2.id
+           ORDER BY rh1.ts""",
+        (agent_did, agent_did),
+    ).fetchall()
+
+    return [dict(r) for r in rows]
+
+
 # ─── Leaderboard ───
 
 

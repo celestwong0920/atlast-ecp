@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from .. import database as db
 from ..auth import verify_agent_key
 from ..merkle import verify_merkle_root
-from ..models import BatchUploadRequest, BatchUploadResponse
+from ..models import BatchUploadRequest, BatchUploadResponse, BatchDetailResponse
 
 router = APIRouter(prefix="/v1", tags=["batches"])
 
@@ -49,4 +49,21 @@ def upload_batch(req: BatchUploadRequest, agent: dict = Depends(verify_agent_key
         record_count=result["record_count"],
         merkle_root=result["merkle_root"],
         status="accepted",
+    )
+
+
+@router.get("/batches/{batch_id}", response_model=BatchDetailResponse)
+def get_batch_detail(batch_id: str):
+    """Get batch metadata + all record hashes."""
+    result = db.get_batch_with_records(batch_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return BatchDetailResponse(
+        batch_id=result["id"],
+        agent_id=result["agent_id"],
+        batch_ts=result["batch_ts"],
+        merkle_root=result["merkle_root"],
+        record_count=result["record_count"],
+        flag_counts=result.get("flag_counts"),
+        records=result["records"],
     )

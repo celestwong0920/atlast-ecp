@@ -12,7 +12,11 @@ import sqlite3
 from fastapi import APIRouter, HTTPException
 
 from .. import database as db
-from ..models import AgentProfile, AgentRegisterRequest, AgentRegisterResponse, TrustSignals
+from fastapi import Query
+from ..models import (
+    AgentProfile, AgentRegisterRequest, AgentRegisterResponse,
+    TrustSignals, PaginatedBatchResponse, HandoffEntry,
+)
 from ..scoring import compute_trust_signals
 
 router = APIRouter(prefix="/v1/agents", tags=["agents"])
@@ -65,3 +69,29 @@ def get_agent_profile(handle: str):
         last_active=stats["last_active"],
         trust_signals=TrustSignals(**signals),
     )
+
+
+@router.get("/{handle}/batches", response_model=PaginatedBatchResponse)
+def get_agent_batches(
+    handle: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Paginated batch listing for an agent."""
+    agent = db.get_agent_by_handle(handle)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    items, total = db.get_batches_paginated(agent["id"], page=page, limit=limit)
+    return PaginatedBatchResponse(total=total, page=page, limit=limit, items=items)
+
+
+@router.get("/{handle}/handoffs", response_model=list[HandoffEntry])
+def get_agent_handoffs(handle: str):
+    """Get A2A handoffs involving this agent."""
+    agent = db.get_agent_by_handle(handle)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    rows = db.get_handoffs_by_agent(agent["did"])
+    return [HandoffEntry(**r) for r in rows]

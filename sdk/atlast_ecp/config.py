@@ -64,3 +64,21 @@ def get_api_key() -> Optional[str]:
         return env_key
     cfg = load_config()
     return cfg.get("agent_api_key") or None
+
+
+def get_webhook_url() -> Optional[str]:
+    """Get webhook URL: env ECP_WEBHOOK_URL > config webhook_url > None."""
+    env = os.environ.get("ECP_WEBHOOK_URL")
+    if env:
+        return env.rstrip("/")
+    cfg = load_config()
+    return cfg.get("webhook_url") or None
+
+
+def get_webhook_token() -> Optional[str]:
+    """Get webhook token: env ECP_WEBHOOK_TOKEN > config webhook_token > None."""
+    env = os.environ.get("ECP_WEBHOOK_TOKEN")
+    if env:
+        return env
+    cfg = load_config()
+    return cfg.get("webhook_token") or None

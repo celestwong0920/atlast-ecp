@@ -2,6 +2,38 @@
 
 All notable changes to ATLAST ECP are documented in this file.
 
+## [0.7.0] - 2026-03-20
+
+### Added
+- **Insights Layer B** — split into 3 independent sub-functions:
+  - `analyze_performance()`: latency, throughput, success rate, by-model breakdown
+  - `analyze_trends()`: time-series trends bucketed by day/hour
+  - `analyze_tools()`: tool usage distribution and error rates
+  - CLI: `atlast insights --section performance|trends|tools [--bucket hour]`
+  - Server: `GET /v1/insights/performance|trends|tools` endpoints
+- **API Enhancements**:
+  - Paginated batch listing: `GET /v1/agents/{handle}/batches?page=&limit=`
+  - Batch detail with records: `GET /v1/batches/{batch_id}`
+  - A2A handoffs query: `GET /v1/agents/{handle}/handoffs`
+- **Webhook** (`atlast_ecp.webhook`):
+  - `fire_webhook()`: async POST, fail-open, retry 1x on 5xx, timeout 5s
+  - `build_webhook_payload()`: CERTIFICATE-SCHEMA.md Section 3 compliant
+  - Server auto-fires webhook after batch creation
+- **`.well-known/ecp.json` Discovery** (RFC 8615):
+  - Server returns capabilities, endpoints, auth methods
+  - CLI: `atlast discover <url>`
+- **AutoGen Adapter** (`atlast_ecp.adapters.autogen`):
+  - `register_atlast(agent)` one-line integration
+  - Multi-agent handoff detection (source/target tracking)
+  - Zero dependency (runtime import only)
+- **CLI `config` command**: `atlast config get|set <key> <value>`
+- **ECP-SERVER-SPEC.md v1.1**: 6 new sections (Insights, Batch Detail, Pagination, Handoffs, Discovery, Webhook)
+
+### Fixed
+- **Merkle tree sort inconsistency** (BUG-1): Server `merkle.py` was sorting hashes before building tree, but SDK preserves insertion order. Unified to no-sort. Added 3 cross-SDK consistency tests.
+- **DID example format** (BUG-2): ECP-SERVER-SPEC.md examples changed from `z6Mk...` multibase to `{hex}` format matching actual SDK output.
+- **Insights `model=None` key**: `analyze_performance()` now defaults `None` model to `"unknown"`.
+
 ## [0.6.1] - 2026-03-18
 
 ### Added
