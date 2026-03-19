@@ -1,368 +1,362 @@
-# ATLAST ECP — Phase 3 详细开发计划
+# ATLAST ECP — Phase 3 详细开发计划（任务细分版）
 
 > **目标**：从 "完整 SDK + 参考实现" 进化为 "生产就绪的协议生态"
-> **起始版本**：v0.6.1（PyPI + npm 已发布）
-> **起始测试**：412 passed, 2 skipped
-> **起始 commit**：`935d60a` (main = origin/main)
-> **预计总工时**：14-18 小时
-> **执行顺序**：P3-1 → P3-2 → P3-3 → P3-4 → P3-5 → P3-6 → P3-7 → P3-8
+> **起始版本**：v0.6.1 | **目标版本**：v0.7.0
+> **起始测试**：415 passed, 2 skipped（含 BUG-1 修复后新增 3 个）
+> **起始 commit**：`7ed9b6b` (main = origin/main)
+> **预计总工时**：~10.5h
+> **预计完成后测试**：455+
+> **分工确认**：全部任务在 `atlast-ecp/` repo 内，不触碰 `llachat-platform/`、`api.llachat.com`、Trust Score 算法
 
 ---
 
-## 当前已完成基线（P0 — P2 Summary）
+## 已修复的 P0-P2 遗留问题（commit 7ed9b6b）
 
-| 阶段 | 状态 | 核心产出 |
-|------|------|---------|
-| P0 | ✅ | Bug fixes, core.py 重构, record ID 统一 |
-| P1-Infra | ✅ | PyPI v0.6.1, npm v0.1.0, GitHub CI, OpenClaw Plugin |
-| P1-Strategy | ✅ | ECP v1.0 Spec, Proxy, CLI 扩展, 5-Level Record, README 全面重写 |
-| P1-Adapters | ✅ | LangChain + CrewAI adapters, Insights v0.1 |
-| P1-Docs | ✅ | ECP-SPEC.md, ECP-SERVER-SPEC.md, CHANGELOG.md, CERTIFICATE-SCHEMA.md |
-| P2-1 | ✅ | Reference ECP Server (FastAPI + SQLite, 4 endpoints, 23 tests, Docker) |
-| P2-2 | ✅ | GitHub 社区模板 (Issue/PR templates, CONTRIBUTING, CoC, SECURITY) |
-| P2-3 | ✅ | 全球 AI 合规指南 (5 capabilities × 5 regulations) |
-| P2-4 | ✅ | A2A 多方验证 (handoff/orphan/blame/DAG, 18 tests) |
-| P2-5 | ✅ | Go SDK 骨架 (types/hash/record/storage/verify/CLI) |
-
-**SDK 模块**：20 Python + 3 adapters + 8 server + Go SDK + TS SDK
-**测试**：412 passed, 2 skipped (Python + Server)
-**发布**：PyPI v0.6.1, npm v0.1.0
+| Bug | 严重度 | 状态 | 修复内容 |
+|-----|--------|------|---------|
+| BUG-1 Merkle 排序不一致 | 🔴 严重 | ✅ 已修复 | `server/merkle.py` 去掉 `sorted()`，与 SDK `batch.py` 统一为保留原序 |
+| BUG-2 DID 示例格式 | 🟡 低 | ✅ 已修复 | `ECP-SERVER-SPEC.md` 5 处 `z6Mk...` → `a1b2c3d4...` hex 格式 |
 
 ---
 
-## 🔴 P0-P2 遗留问题（P3 优先修复）
+## P3-1: Insights Layer B — 拆分子端点（~2h，≥12 新测试）
 
-### BUG-1: Merkle Tree 排序不一致（严重）
+**背景**：Alex 要求 Dashboard 异步加载 3 个独立面板。当前 `analyze_records()` 返回 7 个 key 的单一大对象。
+**影响范围**：`sdk/atlast_ecp/insights.py`、`sdk/atlast_ecp/cli.py`、`server/routes/`、`server/models.py`
 
-**问题**：SDK `batch.py:build_merkle_tree()` **不排序** hashes，按原始顺序配对。Server `merkle.py:build_merkle_root()` **先 sorted()** 再配对。当 record hashes 不是字典序排列时，SDK 生成的 merkle_root 与 Server 验证用的 root 不同 → **batch upload 的 merkle 验证会误报失败**。
+### 子任务
 
-**影响**：生产环境中 `POST /v1/batches` 带 `merkle_root` 时，如果 records 不是字典序，server 会拒绝合法 batch。
+| ID | 任务 | 改动文件 | 依赖 | 验收标准 |
+|----|------|---------|------|---------|
+| 3.1.1 | `analyze_performance(records)` 函数 | `insights.py` | 无 | 返回 `{avg_latency_ms, p95_latency_ms, success_rate, throughput_per_min, total_records, by_model: {model: {avg_ms, count}}}` |
+| 3.1.2 | `analyze_trends(records, bucket="day")` 函数 | `insights.py` | 无 | 返回 `{buckets: [{period, record_count, avg_latency_ms, error_count}], bucket_size}` |
+| 3.1.3 | `analyze_tools(records, top_n=10)` 函数 | `insights.py` | 无 | 返回 `{tools: [{name, count, avg_duration_ms, error_rate}], total_tool_calls}` |
+| 3.1.4 | 重构 `analyze_records()` | `insights.py` | 3.1.1-3 | 内部调用 3 个子函数聚合，**返回值 key 不变**（`summary`, `latency_by_model`, `model_usage`, `flags`, `error_count`, `high_latency_count`, `recommendations`）→ 向后兼容 |
+| 3.1.5 | CLI `--section` 参数 | `cli.py` | 3.1.1-3 | `atlast insights --section performance\|trends\|tools`；无参数 = 全部（现有行为） |
+| 3.1.6 | `PerformanceResponse` model | `server/models.py` | 3.1.1 | Pydantic schema |
+| 3.1.7 | `TrendsResponse` model | `server/models.py` | 3.1.2 | Pydantic schema |
+| 3.1.8 | `ToolsResponse` model | `server/models.py` | 3.1.3 | Pydantic schema |
+| 3.1.9 | `server/routes/insights.py` — 3 个端点 | 新文件 | 3.1.6-8 | `GET /v1/insights/performance?agent_did=&period=`、`/trends`、`/tools` |
+| 3.1.10 | 挂载 insights 路由到 `main.py` | `server/main.py` | 3.1.9 | `app.include_router(insights.router)` |
+| 3.1.11 | SDK 单元测试 | `sdk/tests/test_insights.py` | 3.1.1-4 | ≥6 个：3 个子函数各 1 正常 + 1 空输入 |
+| 3.1.12 | Server 端点测试 | `server/tests/test_insights.py` | 3.1.9 | ≥6 个：3 个端点各 1 正常 + 1 无数据 |
 
-**修复方案**：统一为 **不排序**（SDK 行为优先，因为已有生产数据）。修改 `server/merkle.py` 删除 `sorted()` 调用。
+### 逻辑碰撞检查
 
-**验证**：写跨 SDK-Server 一致性测试。
-
-### BUG-2: ECP-SERVER-SPEC.md DID 示例格式不一致（低）
-
-**问题**：Spec 中 DID 示例用 `did:ecp:z6Mk...`（multibase 风格），实际 SDK 用 `did:ecp:{32 hex chars}`。不影响功能，但会误导开发者。
-
-**修复**：P3-6 中统一所有示例为 `did:ecp:a1b2c3d4...` hex 格式。
-
----
-
-## P3 任务清单
-
-### P3-1: Insights Layer B — 拆分子端点 (~2h) ⭐ 高优先级
-
-**背景**：Alex 提出 Insights 拆分为 3 个子端点，方便 Dashboard 异步加载各面板。当前 `analyze_records()` 返回单一大对象，需要拆为可独立调用的模块。
-
-**目标**：
-- SDK 内部：`insights.py` 拆为 `performance()`, `trends()`, `tools()` 三个独立函数
-- Reference Server：新增 3 个 API 端点
-- CLI：`atlast insights --section performance|trends|tools`
-
-| ID | 任务 | 依赖 | 验收标准 | 估时 |
-|----|------|------|---------|------|
-| 3.1.1 | 拆分 `insights.py` 内部函数 | 无 | `analyze_performance()`, `analyze_trends()`, `analyze_tools()` 三个函数，各自独立可调用；原 `analyze_records()` 保留为聚合调用 | 30m |
-| 3.1.2 | CLI `--section` 参数 | 3.1.1 | `atlast insights --section performance` 只输出性能分析；无参数 = 全部 | 15m |
-| 3.1.3 | Server `/v1/insights/performance` | 3.1.1 | GET 端点，接受 `agent_did` + `period` 参数，返回延迟/吞吐/成功率 | 20m |
-| 3.1.4 | Server `/v1/insights/trends` | 3.1.1 | GET 端点，返回时序趋势数据（按日/周聚合） | 20m |
-| 3.1.5 | Server `/v1/insights/tools` | 3.1.1 | GET 端点，返回 tool 使用分布 + 耗时排名 | 15m |
-| 3.1.6 | 测试 | 3.1.2-3.1.5 | ≥12 个新测试；覆盖各子函数 + API 端点 + CLI section 参数 | 20m |
-
-**与 P0-P2 逻辑闭环**：
-- ✅ `analyze_records()` 向后兼容（聚合三个子函数）
-- ✅ 子端点响应格式与 Alex 对齐的拆分方案一致（performance/trends/tools）
-- ✅ Server 端点遵循 ECP-SERVER-SPEC.md 的 `/v1/` prefix 约定
-- ✅ 不改变现有 CLI `atlast insights` 的默认行为
+| 检查项 | 结果 |
+|--------|------|
+| `analyze_records()` 返回值结构是否改变？ | ❌ 不变。内部重构，外部 key 完全保留 |
+| 现有 `test_insights.py` 的 15 个测试会 break 吗？ | ❌ 不会。`analyze_records()` 行为不变 |
+| CLI `atlast insights`（无参数）行为变吗？ | ❌ 不变。`--section` 是新增可选参数 |
+| Server insights 端点需要 auth 吗？ | 不需要。Insights 是 agent 自己的数据分析，Reference Server 场景下用 `agent_did` 过滤即可 |
+| `insights.py` 导入了 `storage.py` 吗？ | 是，`cmd_insights()` 调用 `load_records()`。子函数只接受 `records` 参数，不直接 import storage |
+| Trends 的 timestamp 来自哪个字段？ | v1.0 用 `ts`（epoch ms），v0.1 用 `timestamp`（ISO8601）。需要在 `analyze_trends()` 内部处理两种格式 |
 
 ---
 
-### P3-2: API 增强 — 分页 + Batch Records + Handoffs (~2h)
+## P3-2: API 增强 — 分页 + Batch Records + Handoffs（~2h，≥10 新测试）
 
-**背景**：Alex 对齐时提出 Dashboard 需要分页、batch 详情返回 records 数组、以及 handoffs 查询端点。
+**背景**：Alex 对齐时提出 Dashboard 需要分页、batch 详情、handoffs 查询。
+**影响范围**：`server/routes/`、`server/models.py`、`server/database.py`
 
-| ID | 任务 | 依赖 | 验收标准 | 估时 |
-|----|------|------|---------|------|
-| 3.2.1 | Batch listing 分页 | 无 | `GET /v1/agents/{did}/batches?page=1&limit=20`，返回 `total`, `page`, `limit`, `items` | 20m |
-| 3.2.2 | Batch detail 返回 records | 无 | `GET /v1/batches/{batch_id}` 返回 batch 元数据 + `records: [hash1, hash2, ...]` | 20m |
-| 3.2.3 | Profile 分页 | 无 | `GET /v1/agents/{did}/profile` 的 `recent_batches` 支持 `?limit=` | 10m |
-| 3.2.4 | Handoffs 端点 | 无 | `GET /v1/agents/{did}/handoffs` 返回该 agent 参与的所有 A2A handoff 记录 | 25m |
-| 3.2.5 | Server 实现上述端点 | 3.2.1-3.2.4 | Reference Server 同步添加所有新端点 | 20m |
-| 3.2.6 | 测试 | 3.2.5 | ≥10 个新测试 | 15m |
+### 子任务
 
-**与 P0-P2 逻辑闭环**：
-- ✅ 分页格式与 ECP-SERVER-SPEC.md 保持一致风格
-- ✅ Handoffs 端点返回的数据结构与 A2A (`a2a.py`) 的 `Handoff` dataclass 字段对齐
-- ✅ `batch_id` 与 A2A 的 `source_batch_id`/`target_batch_id` 字段呼应（P2-4 commit 4a009fc）
-- ✅ 分页 response 遵循 `{total, page, limit, items}` 通用模式
+| ID | 任务 | 改动文件 | 依赖 | 验收标准 |
+|----|------|---------|------|---------|
+| 3.2.1 | `PaginatedResponse` 通用 model | `server/models.py` | 无 | `{total: int, page: int, limit: int, items: list}` generic |
+| 3.2.2 | DB: `get_batches_paginated(agent_id, page, limit)` | `server/database.py` | 无 | 返回 `(items, total)`；SQL `LIMIT ? OFFSET ?` |
+| 3.2.3 | DB: `get_batch_with_records(batch_id)` | `server/database.py` | 无 | JOIN `record_hashes` 表，返回 batch 元数据 + records 数组 |
+| 3.2.4 | DB: `get_handoffs_by_agent(agent_did)` | `server/database.py` | 无 | 查询 `record_hashes` 中 out_hash = 另一 agent 的 in_hash（跨 batch 匹配） |
+| 3.2.5 | `GET /v1/agents/{did}/batches?page=&limit=` | `server/routes/agents.py` | 3.2.1-2 | 分页返回 agent 的 batches |
+| 3.2.6 | `GET /v1/batches/{batch_id}` | `server/routes/batches.py` | 3.2.3 | 返回 batch 元数据 + `records: [{record_id, chain_hash, step_type}]` |
+| 3.2.7 | `HandoffResponse` model | `server/models.py` | 无 | 字段与 SDK `a2a.py` `Handoff` dataclass 对齐：`source_agent, source_record_id, target_agent, target_record_id, hash_value, source_ts, target_ts, valid, source_batch_id, target_batch_id` |
+| 3.2.8 | `GET /v1/agents/{did}/handoffs` | 新增到 `server/routes/agents.py` | 3.2.4, 3.2.7 | 返回该 agent 参与的 handoffs |
+| 3.2.9 | Profile `recent_batches` 支持 `?limit=` | `server/routes/agents.py` | 无 | 默认 10，max 100 |
+| 3.2.10 | 分页测试 | `server/tests/test_batches.py` | 3.2.5-6 | ≥4 个：第一页/第二页/超出范围/空结果 |
+| 3.2.11 | Handoffs 测试 | `server/tests/test_agents.py` | 3.2.8 | ≥3 个：有 handoff/无 handoff/多 agent |
+| 3.2.12 | Batch detail 测试 | `server/tests/test_batches.py` | 3.2.6 | ≥3 个：正常/不存在/records 数组完整 |
 
----
+### 逻辑碰撞检查
 
-### P3-3: Webhook Attestation Trigger (~1.5h)
-
-**背景**：CERTIFICATE-SCHEMA.md Section 3 定义了 webhook payload 格式。Alex 选了方案B（webhook push）。需要在 SDK/Server 侧实现 webhook 发送逻辑。
-
-| ID | 任务 | 依赖 | 验收标准 | 估时 |
-|----|------|------|---------|------|
-| 3.3.1 | `sdk/atlast_ecp/webhook.py` | 无 | `fire_webhook(payload, url, token)` — async POST, fail-open, retry 1x, timeout 5s | 20m |
-| 3.3.2 | CLI `atlast config set webhook_url <url>` | 3.3.1 | 写入 `~/.atlast/config.json`；`webhook_token` 同理 | 15m |
-| 3.3.3 | Server webhook 集成 | 3.3.1 | Reference Server 在 batch 创建成功后调用 `fire_webhook()` | 15m |
-| 3.3.4 | Webhook payload 与 CERTIFICATE-SCHEMA.md 对齐 | 3.3.1 | payload 字段 100% 匹配 Section 3 定义 | 10m |
-| 3.3.5 | 测试 | 3.3.1-3.3.4 | ≥6 个测试（成功/失败/超时/重试/fail-open/payload 验证） | 15m |
-
-**与 P0-P2 逻辑闭环**：
-- ✅ Payload 格式与 `CERTIFICATE-SCHEMA.md` Section 3 完全一致
-- ✅ `X-ECP-Webhook-Token` header 与 CERTIFICATE-SCHEMA.md 定义一致
-- ✅ `cert_id` = `batch_id` 映射关系与 CERTIFICATE-SCHEMA.md Section 3 Note 一致
-- ✅ Fail-open 设计符合 ECP 核心原则（webhook 失败不阻塞 batch 创建）
-- ✅ Config 存储复用 P1 的 `config.py` (`~/.atlast/config.json`)
+| 检查项 | 结果 |
+|--------|------|
+| 现有 `GET /v1/agents/{did}/profile` 会被影响吗？ | ❌ 不变。分页是新增参数，Profile 端点独立 |
+| `HandoffResponse` 字段 ⊇ SDK `Handoff` 字段？ | ✅ 完全覆盖所有 12 个字段（含 `source_batch_id`/`target_batch_id`） |
+| 分页默认值？ | `page=1, limit=20`。与 Alex 对齐的格式一致 |
+| Handoff 的 DB 查询能否实现？| `record_hashes` 表有 `chain_hash` 和 `batch_id`。跨 batch 匹配 out_hash=in_hash 需要 self-join。需要在 `record_hashes` 表新增 `hash_type` 列区分 in/out hash，或者直接存 `in_hash` + `out_hash` 两列 |
+| ⚠️ **发现**：`record_hashes` 表只有 `chain_hash` 一列 | 需要改 DB schema 增加 `in_hash` 和 `out_hash` 列，或改为在 batch upload 时从 record 中提取并存储。**P3-2 新增子任务 3.2.4a** |
+| 3.2.4a: DB schema migration | `database.py` 新增 `in_hash TEXT, out_hash TEXT` 列到 `record_hashes`；`batches.py` upload 时提取并存储 |
 
 ---
 
-### P3-4: `.well-known` Discovery Endpoint (~1h)
+## P3-3: Webhook Attestation Trigger（~1.5h，≥6 新测试）
 
-**背景**：Enterprise 需要发现 ECP Server 的能力。Boss 决定 P3 做 spec，P4 做 enterprise 对接。
+**背景**：CERTIFICATE-SCHEMA.md Section 3 定义了 webhook payload。Alex 选方案B（push）。
+**影响范围**：新文件 `sdk/atlast_ecp/webhook.py`、`sdk/atlast_ecp/config.py`、`sdk/atlast_ecp/cli.py`、`server/routes/batches.py`
 
-| ID | 任务 | 依赖 | 验收标准 | 估时 |
-|----|------|------|---------|------|
-| 3.4.1 | `.well-known/ecp.json` 规范 | 无 | 定义标准 discovery 文档：版本、支持的端点列表、capabilities（batch/anchor/a2a/insights）、EAS chain info | 15m |
-| 3.4.2 | 写入 ECP-SERVER-SPEC.md | 3.4.1 | 在现有 spec 末尾添加 Section 5: Discovery | 10m |
-| 3.4.3 | Reference Server 实现 | 3.4.1 | `GET /.well-known/ecp.json` 返回 discovery 文档 | 15m |
-| 3.4.4 | CLI `atlast discover <url>` | 3.4.3 | 读取远端 `.well-known/ecp.json`，展示 server 能力 | 15m |
-| 3.4.5 | 测试 | 3.4.3-3.4.4 | ≥4 个测试 | 10m |
+### 子任务
 
-**与 P0-P2 逻辑闭环**：
-- ✅ Discovery 返回的端点列表与 ECP-SERVER-SPEC.md 的 4+3 个端点一致
-- ✅ `capabilities` 字段反映实际已实现的功能（batch ✅, a2a ✅, insights ✅, anchor ❌可选）
-- ✅ 遵循 RFC 8615 (`.well-known` URI) 标准
-- ✅ `ecp_version` 字段与 ECP-SPEC.md 的版本号一致
+| ID | 任务 | 改动文件 | 依赖 | 验收标准 |
+|----|------|---------|------|---------|
+| 3.3.1 | `webhook.py` — `fire_webhook(payload, url, token)` | 新文件 | 无 | async POST，timeout 5s，retry 1x on 5xx，fail-open（异常只 log 不 raise）。用 `urllib.request` 无外部依赖 |
+| 3.3.2 | `build_webhook_payload(batch_data)` | `webhook.py` | 无 | 生成与 CERTIFICATE-SCHEMA.md Section 3 完全一致的 payload：`event, cert_id, agent_did, batch_merkle_root, record_count, attestation_uid, eas_tx_hash, schema_uid, chain_id, on_chain, created_at` |
+| 3.3.3 | CLI `atlast config set webhook_url <url>` | `cli.py` | 无 | 写入 `~/.atlast/config.json`；`atlast config set webhook_token <token>` 同理 |
+| 3.3.4 | CLI `atlast config get` | `cli.py` | 无 | 显示当前配置（隐藏 token 中间部分） |
+| 3.3.5 | `config.py` 新增 `get_webhook_url()`, `get_webhook_token()` | `config.py` | 无 | 优先级：env `ECP_WEBHOOK_URL` > config file > None |
+| 3.3.6 | Server 集成：batch 创建后触发 webhook | `server/routes/batches.py` | 3.3.1, 3.3.5 | `upload_batch()` 成功后调用 `fire_webhook()`；webhook 失败不影响 201 响应 |
+| 3.3.7 | 测试：webhook 成功发送 | `sdk/tests/test_webhook.py` | 3.3.1-2 | mock HTTP server，验证 payload 字段完整 |
+| 3.3.8 | 测试：webhook 失败 fail-open | `sdk/tests/test_webhook.py` | 3.3.1 | 目标不可达时不 raise，返回 False |
+| 3.3.9 | 测试：webhook retry on 5xx | `sdk/tests/test_webhook.py` | 3.3.1 | 第一次 500，第二次 200 → 成功 |
+| 3.3.10 | 测试：payload 与 CERTIFICATE-SCHEMA.md 一致 | `sdk/tests/test_webhook.py` | 3.3.2 | 逐字段验证 payload keys 完全匹配 Section 3 |
+| 3.3.11 | Server webhook 测试 | `server/tests/test_batches.py` | 3.3.6 | batch upload + mock webhook endpoint → 验证调用 |
+| 3.3.12 | Config CLI 测试 | `sdk/tests/test_cli.py` 或新文件 | 3.3.3-4 | set/get 往返验证 |
 
----
+### 逻辑碰撞检查
 
-### P3-5: AutoGen Adapter (~1.5h)
-
-**背景**：继 LangChain + CrewAI 后的第三个框架适配器。AutoGen 是微软的多 agent 框架，市场份额增长快。
-
-| ID | 任务 | 依赖 | 验收标准 | 估时 |
-|----|------|------|---------|------|
-| 3.5.1 | `sdk/atlast_ecp/adapters/autogen.py` | 无 | `ATLASTAutoGenMiddleware` — 拦截 AutoGen v0.4+ 的 `AgentChat` 消息流 | 30m |
-| 3.5.2 | 支持 AutoGen `ConversableAgent` | 3.5.1 | 注册为 `reply_func` 或使用 middleware pattern | 15m |
-| 3.5.3 | 多 agent 场景 | 3.5.1 | 自动检测 agent 间消息传递，生成 A2A handoff 记录 | 20m |
-| 3.5.4 | 测试 | 3.5.1-3.5.3 | ≥8 个测试（mock AutoGen classes，不依赖安装） | 15m |
-
-**与 P0-P2 逻辑闭环**：
-- ✅ 零依赖原则：`import autogen` 在运行时，`HAS_AUTOGEN` flag（与 LangChain/CrewAI adapter 模式一致）
-- ✅ 调用 `core.create_record()` 生成 ECP 记录（与其他 adapter 一致）
-- ✅ A2A handoff 记录与 `a2a.py` 的 `Handoff` dataclass 兼容
-- ✅ `adapters/__init__.py` 注册新 adapter
-- ✅ 不硬依赖 AutoGen 版本（runtime import + try/except）
+| 检查项 | 结果 |
+|--------|------|
+| `webhook.py` 引入新依赖吗？ | ❌ 使用 `urllib.request`（stdlib）。不引入 `aiohttp`/`requests` |
+| `config.py` 的 `load_config()` 改变吗？ | ❌ 不变。新增 2 个 getter 函数，`load_config()` 用 `.get()` 自动兼容新字段 |
+| CLI `config set` 与现有 `atlast init` 冲突吗？ | ❌ `init` 写 `agent_did`/`endpoint`，`config set` 写任意 key。两者都调 `save_config()` |
+| Webhook payload 的 `cert_id` = `batch_id`？ | ✅ 与 CERTIFICATE-SCHEMA.md Section 3 Note 一致 |
+| Server 的 `fire_webhook` 是同步还是异步？ | Server 用 FastAPI（async），webhook 发送用 `asyncio` 或 background task，不阻塞响应 |
+| Webhook token 与 X-Agent-Key 混淆？ | ❌ 不同 header：webhook 用 `X-ECP-Webhook-Token`，batch upload 用 `X-Agent-Key` |
 
 ---
 
-### P3-6: ECP-SERVER-SPEC.md v1.1 更新 (~30m)
+## P3-4: `.well-known` Discovery Endpoint（~1h，≥4 新测试）
 
-**背景**：P3 新增了多个端点（insights × 3, handoffs, discovery, webhook），需要更新规范文档。
+**背景**：Enterprise 自动发现 ECP Server 能力。遵循 RFC 8615。
+**影响范围**：`ECP-SERVER-SPEC.md`、`server/main.py`、`sdk/atlast_ecp/cli.py`
 
-| ID | 任务 | 依赖 | 验收标准 | 估时 |
-|----|------|------|---------|------|
-| 3.6.1 | 添加 Insights 端点文档 | P3-1 | 3 个 insights 端点的请求/响应格式 | 10m |
-| 3.6.2 | 添加 Handoffs 端点文档 | P3-2 | handoffs 端点请求/响应格式 | 5m |
-| 3.6.3 | 添加 Webhook 配置文档 | P3-3 | webhook 配置方式 + payload 格式引用 CERTIFICATE-SCHEMA.md | 5m |
-| 3.6.4 | 添加 Discovery 端点文档 | P3-4 | `.well-known/ecp.json` 完整规范 | 5m |
-| 3.6.5 | 版本号更新 | 3.6.1-3.6.4 | v1.0 → v1.1，添加变更摘要 | 5m |
+### 子任务
 
----
+| ID | 任务 | 改动文件 | 依赖 | 验收标准 |
+|----|------|---------|------|---------|
+| 3.4.1 | 定义 `.well-known/ecp.json` schema | 文档 | 无 | 字段：`ecp_version`, `server_version`, `endpoints[]`, `capabilities[]`, `chain` (optional) |
+| 3.4.2 | Server `GET /.well-known/ecp.json` | `server/main.py` | 3.4.1 | 返回 discovery 文档；`capabilities` 动态反映已启用功能 |
+| 3.4.3 | CLI `atlast discover <url>` | `cli.py` | 3.4.1 | 请求 `<url>/.well-known/ecp.json`，格式化展示 server 信息 |
+| 3.4.4 | 测试：Server discovery 端点 | `server/tests/test_discovery.py` | 3.4.2 | 返回 200 + 正确 JSON schema |
+| 3.4.5 | 测试：capabilities 列表正确 | `server/tests/test_discovery.py` | 3.4.2 | 含 `batch`, `profile`, `leaderboard`, `insights`, `handoffs` |
+| 3.4.6 | 测试：CLI discover 解析 | `sdk/tests/test_cli.py` 或新文件 | 3.4.3 | mock response → 正确输出 |
+| 3.4.7 | 测试：不可达 URL 优雅报错 | | 3.4.3 | 不 crash，输出错误信息 |
 
-### P3-7: PyPI v0.7.0 + GitHub Release (~30m)
-
-| ID | 任务 | 依赖 | 验收标准 | 估时 |
-|----|------|------|---------|------|
-| 3.7.1 | `pyproject.toml` 版本 → 0.7.0 | 全部 P3 | version 字段更新 | 2m |
-| 3.7.2 | CHANGELOG.md 更新 | 3.7.1 | v0.7.0 条目：Insights B, API 增强, Webhook, Discovery, AutoGen | 10m |
-| 3.7.3 | Git commit + push | 3.7.2 | 所有 P3 代码 + 文档推到 origin/main | 5m |
-| 3.7.4 | GitHub Release v0.7.0 | 3.7.3 | 创建 Release → 触发 GitHub Actions → PyPI 发布 | 10m |
-| 3.7.5 | 验证 PyPI | 3.7.4 | `pip install atlast-ecp==0.7.0` 成功 | 3m |
-
----
-
-### P3-8: 全面质量审计 (~1.5h)
-
-| ID | 任务 | 依赖 | 验收标准 | 估时 |
-|----|------|------|---------|------|
-| 3.8.1 | 全测试套件 | 全部 | `python3 -m pytest` 全部 pass，0 regressions | 10m |
-| 3.8.2 | Cross-SDK hash 一致性 | 3.8.1 | Python `sha256()` = Go `Hash()` = TS `computeHash()` 对相同输入 | 15m |
-| 3.8.3 | ECP-SPEC 合规检查 | 3.8.1 | 所有模块生成的记录符合 ECP-SPEC.md v1.0 | 15m |
-| 3.8.4 | Server-SDK 端点一致性 | 3.8.1 | Reference Server 端点与 ECP-SERVER-SPEC.md v1.1 100% 对齐 | 10m |
-| 3.8.5 | Adapter 一致性 | 3.8.1 | LangChain/CrewAI/AutoGen 三个 adapter 的 record 输出格式一致 | 10m |
-| 3.8.6 | CERTIFICATE-SCHEMA 对齐 | 3.8.1 | webhook payload 与 CERTIFICATE-SCHEMA.md Section 3 一致 | 5m |
-| 3.8.7 | A2A + Handoff 端点一致性 | 3.8.1 | `a2a.py` Handoff fields ⊆ `/v1/agents/{did}/handoffs` response fields | 10m |
-| 3.8.8 | Config 路径验证 | 3.8.1 | `~/.atlast/config.json` 支持所有新增字段 (webhook_url, webhook_token) | 5m |
-| 3.8.9 | CLI 子命令完整性 | 3.8.1 | `atlast --help` 列出所有命令；每个子命令 `--help` 正常 | 5m |
-
----
-
-## P3 不做（列入 P4+）
-
-| 项目 | 原因 | 计划阶段 |
-|------|------|---------|
-| Base Mainnet 迁移 | Sepolia 余额足够测试；Mainnet 需要真实 ETH | P4 |
-| Enterprise 外部数据源 | Boss 决定 P4 roadmap，等真实客户需求 | P4 |
-| IETF/W3C 标准草案 | 协议还在快速迭代，过早提交浪费时间 | P4+ |
-| Gateway 合并 | 技术限制 + 收益不明确 | 不做 |
-| TS SDK v0.2.0 | TS 当前 v0.1.0 够用，Python 是主战场 | P4 |
-| Go SDK 测试 | Go 未安装，需要 CI 环境 | P4 |
-| AIP/ASP/ACP 子协议 | 路线图上 Q3-Q4 2026 | P5+ |
-| Insights Layer C (Agent 自优化) | 需要足够数据积累 | P4+ |
-
----
-
-## 风险评估
-
-| 风险 | 概率 | 影响 | 缓解 |
-|------|------|------|------|
-| AutoGen API 变更 (v0.4 vs v0.2) | 中 | 中 | runtime import + version detect |
-| Webhook 在 Reference Server 无外部验证目标 | 低 | 低 | 使用 httpbin 或 mock server 测试 |
-| Insights 拆分破坏现有 JSON 输出 | 中 | 高 | `analyze_records()` 保持向后兼容 |
-| 新端点与 Alex Production Server 不一致 | 中 | 中 | P3 完成后发 alignment 给 Alex |
-
----
-
-## 执行检查清单
-
-- [ ] P3-1: Insights 拆分 → `analyze_performance()` / `analyze_trends()` / `analyze_tools()`
-- [ ] P3-2: API 增强 → 分页 + batch records + handoffs
-- [ ] P3-3: Webhook → `fire_webhook()` + config + server 集成
-- [ ] P3-4: Discovery → `.well-known/ecp.json` + CLI `atlast discover`
-- [ ] P3-5: AutoGen Adapter → `ATLASTAutoGenMiddleware`
-- [ ] P3-6: ECP-SERVER-SPEC.md v1.1
-- [ ] P3-7: PyPI v0.7.0 发布
-- [ ] P3-8: 全面质量审计（0 regressions, 跨 SDK 一致性）
-
----
-
-## 逻辑碰撞验证：P0-P3 全局一致性矩阵
-
-### 1. 数据流一致性
-
-```
-Agent Code
-  ↓ (Layer 0: Proxy intercepts, or Layer 1: @track, or Layer 2: Adapter callback)
-core.create_record()          ← P0 核心, 所有路径汇聚
-  ↓
-storage.save()                ← 本地 .jsonl
-  ↓
-atlast flush / atlast push    ← P1 CLI
-  ↓
-POST /v1/batches              ← P1 路由, P2-1 Server 实现
-  ↓
-Server stores + fire_webhook  ← P3-3 新增
-  ↓
-.well-known/ecp.json          ← P3-4 新增 (discovery)
-```
-
-**验证**：✅ 每一步的数据格式向下兼容，新功能是追加不是替换。
-
-### 2. Record Format 兼容性
-
-| 版本 | 格式 | 产出模块 | 消费模块 |
-|------|------|---------|---------|
-| v0.1 | nested (input/reasoning/execution) | 旧 SDK | Server accepts ✅, insights accepts ✅ |
-| v1.0 L1 | flat 7 fields | Proxy, @track minimal | Server accepts ✅, insights accepts ✅ |
-| v1.0 L2-L5 | flat 7 + optional fields | SDK full | Server accepts ✅, insights accepts ✅ |
-
-**验证**：✅ `analyze_records()` 在 P3-1 拆分后仍然接受所有版本格式。
-
-### 3. 端点路由一致性
-
-| 端点 | ECP-SERVER-SPEC | Reference Server | SDK CLI |
-|------|----------------|-------------------|---------|
-| `POST /v1/agents/register` | v1.0 ✅ | P2-1 ✅ | `atlast register` ✅ |
-| `POST /v1/batches` | v1.0 ✅ | P2-1 ✅ | `atlast flush` ✅ |
-| `GET /v1/agents/{did}/profile` | v1.0 ✅ | P2-1 ✅ | — |
-| `GET /v1/leaderboard` | v1.0 ✅ | P2-1 ✅ | — |
-| `GET /v1/insights/performance` | v1.1 (P3) | P3-1 🔲 | `atlast insights --section perf` 🔲 |
-| `GET /v1/insights/trends` | v1.1 (P3) | P3-1 🔲 | `atlast insights --section trends` 🔲 |
-| `GET /v1/insights/tools` | v1.1 (P3) | P3-1 🔲 | `atlast insights --section tools` 🔲 |
-| `GET /v1/agents/{did}/handoffs` | v1.1 (P3) | P3-2 🔲 | `atlast a2a --agent {did}` 🔲 |
-| `GET /.well-known/ecp.json` | v1.1 (P3) | P3-4 🔲 | `atlast discover` 🔲 |
-
-**验证**：✅ 所有新端点在 P3-6 中统一写入 ECP-SERVER-SPEC.md v1.1。
-
-### 4. 分工边界检查
-
-| 模块 | 负责人 | P3 是否触碰 | 合规 |
-|------|--------|------------|------|
-| `atlast-ecp/` 全部 | Atlas | ✅ 触碰 | ✅ 在职责范围内 |
-| `llachat-platform/` | Alex | ❌ 不触碰 | ✅ 铁律遵守 |
-| Production API (api.llachat.com) | Alex | ❌ 不触碰 | ✅ |
-| Trust Score 算法 | Alex 私有 | ❌ 不触碰 | ✅ Boss 决策 |
-| Reference Server `scoring.py` | Atlas | ✅ 已有，P3 不改 | ✅ 独立实现，非 LLaChat 算法 |
-
-### 5. 配置系统一致性
+### Discovery 文档格式
 
 ```json
-// ~/.atlast/config.json — P3 后完整字段
 {
-  "endpoint": "https://api.example.com",    // P1 已有
-  "api_key": "atl_xxx",                     // P1 已有
-  "agent_did": "did:ecp:xxx",               // P1 已有
-  "webhook_url": "https://...",             // P3-3 新增
-  "webhook_token": "ecp-internal-xxx"       // P3-3 新增
+  "ecp_version": "1.0",
+  "server_version": "0.7.0",
+  "server_name": "ATLAST Reference ECP Server",
+  "endpoints": [
+    {"path": "/v1/agents/register", "method": "POST"},
+    {"path": "/v1/batches", "method": "POST"},
+    {"path": "/v1/agents/{did}/profile", "method": "GET"},
+    {"path": "/v1/leaderboard", "method": "GET"},
+    {"path": "/v1/insights/performance", "method": "GET"},
+    {"path": "/v1/insights/trends", "method": "GET"},
+    {"path": "/v1/insights/tools", "method": "GET"},
+    {"path": "/v1/agents/{did}/handoffs", "method": "GET"},
+    {"path": "/v1/agents/{did}/batches", "method": "GET"},
+    {"path": "/v1/batches/{batch_id}", "method": "GET"}
+  ],
+  "capabilities": ["batch", "profile", "leaderboard", "insights", "handoffs", "discovery"],
+  "auth_methods": ["X-Agent-Key"],
+  "chain": null
 }
 ```
 
-**验证**：✅ `config.py` 的 `load_config()` 使用 `.get()` 读取，新字段不影响旧配置。
+### 逻辑碰撞检查
 
-### 6. 跨系统接口一致性（Atlas ↔ Alex）
-
-| 接口 | Atlas 状态 | Alex 需要 | 对齐状态 |
-|------|-----------|-----------|---------|
-| ECP 数据格式 | ECP-SPEC.md v1.0 ✅ | Dashboard 展示 | ✅ 已对齐 |
-| Certificate 字段 | CERTIFICATE-SCHEMA.md ✅ | DB 表结构 | ✅ 已对齐 |
-| Webhook payload | P3-3 实现 🔲 | `/v1/internal/ecp-webhook` 端点 | ✅ 格式已对齐，实现待双方各做 |
-| Insights 拆分 | P3-1 实现 🔲 | Dashboard 3 个 panel | ✅ Alex 提出，Atlas 同意 |
-| 分页格式 | P3-2 实现 🔲 | Dashboard 列表页 | ✅ `{total,page,limit,items}` 已对齐 |
-| Handoffs API | P3-2 实现 🔲 | Dashboard handoff 视图 | ✅ Alex 提出，Atlas 同意 |
-
-### 7. Hash 算法一致性
-
-| SDK | 函数 | 算法 | 输入规范化 |
-|-----|------|------|-----------|
-| Python | `core.compute_hash()` | SHA-256 | `json.dumps(sort_keys=True)` |
-| TypeScript | `computeHash()` | SHA-256 | canonical JSON sort |
-| Go | `Hash()` | SHA-256 | `json.Marshal()` (Go 默认 sorted keys) |
-| OpenClaw Plugin | `canonicalJSON()` | SHA-256 | recursive sort (P2 audit 修复) |
-| Reference Server | `merkle.py` | SHA-256 | 同 Python SDK |
-
-**验证**：✅ 所有 SDK 对相同输入产生相同 hash（P2 审计已验证）。
-
-### 8. DID 格式一致性
-
-| 位置 | DID 前缀 | 格式 |
-|------|---------|------|
-| `identity.py` | `did:ecp:` | `did:ecp:` + 32 hex |
-| `CERTIFICATE-SCHEMA.md` | `did:ecp:` | ✅ 一致 |
-| `ECP-SERVER-SPEC.md` | `did:ecp:z6Mk...` | ⚠️ 示例用了不同后缀格式 |
-| Reference Server | `did:ecp:` | ✅ 一致 |
-| Production DB | `did:ecp:` | ✅ Alex 确认 |
-
-**注意**：ECP-SERVER-SPEC.md 的示例用了 `z6Mk` multibase 风格，而实际 SDK 用 hex。P3-6 中统一示例为 hex 格式。
+| 检查项 | 结果 |
+|--------|------|
+| `/.well-known/` 路径与 FastAPI 路由冲突？ | ❌ FastAPI 支持任意路径 |
+| `ecp_version` 与 `ECP-SPEC.md` 版本一致？ | ✅ 都是 `"1.0"` |
+| `endpoints` 列表与实际路由一致？ | ✅ 包含 P3-1/P3-2 新增的所有端点 |
+| `chain` 字段为何 null？ | Reference Server 不含链上锚定功能（EAS 在 production server）。如果有，返回 `{chain_id, eas_contract}` |
 
 ---
 
-## 总预算
+## P3-5: AutoGen Adapter（~1.5h，≥8 新测试）
 
-| 阶段 | 估时 | 新测试 |
-|------|------|--------|
-| P3-1 Insights B | 2h | ≥12 |
-| P3-2 API 增强 | 2h | ≥10 |
-| P3-3 Webhook | 1.5h | ≥6 |
-| P3-4 Discovery | 1h | ≥4 |
-| P3-5 AutoGen | 1.5h | ≥8 |
-| P3-6 Spec v1.1 | 0.5h | — |
-| P3-7 Release | 0.5h | — |
-| P3-8 审计 | 1.5h | — |
-| **合计** | **~10.5h** | **≥40 新测试** |
+**背景**：第三个框架适配器。微软 AutoGen v0.4+ 使用 `AgentChat` 模式。
+**影响范围**：新文件 `sdk/atlast_ecp/adapters/autogen.py`、`sdk/atlast_ecp/adapters/__init__.py`
 
-预计完成后总测试数：**450+**
+### 子任务
+
+| ID | 任务 | 改动文件 | 依赖 | 验收标准 |
+|----|------|---------|------|---------|
+| 3.5.1 | Runtime import pattern | `autogen.py` | 无 | `try: from autogen import ...; HAS_AUTOGEN = True` 与 LangChain/CrewAI adapter 模式一致 |
+| 3.5.2 | `ATLASTAutoGenMiddleware` 类 | `autogen.py` | 3.5.1 | 拦截 `ConversableAgent` 的 `generate_reply` 调用，记录 input/output hash |
+| 3.5.3 | `register_atlast(agent)` 便捷函数 | `autogen.py` | 3.5.2 | 一行注册：`register_atlast(my_agent)` |
+| 3.5.4 | Multi-agent 消息检测 | `autogen.py` | 3.5.2 | 检测 `sender` ≠ `recipient` 时生成 A2A handoff 风格记录（`meta.handoff = true`） |
+| 3.5.5 | Adapters `__init__.py` 注册 | `adapters/__init__.py` | 3.5.1 | 导出 `ATLASTAutoGenMiddleware`, `register_atlast` |
+| 3.5.6 | 测试：基本记录 | `sdk/tests/test_adapters.py` | 3.5.2 | mock `ConversableAgent`，触发回复 → 验证 ECP record 生成 |
+| 3.5.7 | 测试：multi-agent handoff | `sdk/tests/test_adapters.py` | 3.5.4 | 两个 mock agent 对话 → 验证 handoff record |
+| 3.5.8 | 测试：AutoGen 未安装 | `sdk/tests/test_adapters.py` | 3.5.1 | `HAS_AUTOGEN=False` 时 import 不报错 |
+| 3.5.9 | 测试：record 格式与 LangChain/CrewAI 一致 | `sdk/tests/test_adapters.py` | 3.5.2 | 验证 record 包含 `ecp, id, ts, agent, action, in_hash, out_hash` 7 个必需字段 |
+
+### 逻辑碰撞检查
+
+| 检查项 | 结果 |
+|--------|------|
+| AutoGen v0.2 vs v0.4 API 差异？ | v0.4 用 `AgentChat`（新 API），v0.2 用 `ConversableAgent`。优先支持 v0.2（市场存量大），v0.4 作为可选 |
+| `register_atlast` 与现有 `atlast.init()` 冲突？ | ❌ 不同层级。`init()` 是全局初始化，`register_atlast()` 是单 agent 级注册 |
+| Record 的 `action` 字段值？ | `"autogen_reply"` 或 `"autogen_handoff"`（与 langchain 的 `"langchain_llm_call"` 同层级） |
+| A2A handoff record 与 `a2a.py` 兼容？ | ✅ 生成的 record 含 `in_hash`/`out_hash`，可被 `discover_handoffs()` 扫描匹配 |
+| 硬依赖 AutoGen？ | ❌ runtime import only。`pip install atlast-ecp` 不安装 AutoGen |
+
+---
+
+## P3-6: ECP-SERVER-SPEC.md v1.1 更新（~30m）
+
+### 子任务
+
+| ID | 任务 | 验收标准 |
+|----|------|---------|
+| 3.6.1 | Section 5: Insights 端点 | 3 个端点的 request/response 格式，含 `agent_did` 和 `period` 参数 |
+| 3.6.2 | Section 6: Batch Detail 端点 | `GET /v1/batches/{batch_id}` response 含 `records` 数组 |
+| 3.6.3 | Section 7: Paginated Batch Listing | `GET /v1/agents/{did}/batches?page=&limit=` |
+| 3.6.4 | Section 8: Handoffs 端点 | `GET /v1/agents/{did}/handoffs` response 格式 |
+| 3.6.5 | Section 9: Discovery | `/.well-known/ecp.json` 完整规范 |
+| 3.6.6 | Section 10: Webhook | 引用 CERTIFICATE-SCHEMA.md Section 3，配置方式 |
+| 3.6.7 | 版本号 v1.0 → v1.1 | header + changelog |
+
+### 逻辑碰撞检查
+
+| 检查项 | 结果 |
+|--------|------|
+| 原有 4 个端点文档改变？ | ❌ 不变，只新增 Section 5-10 |
+| 新端点路径与现有冲突？ | ❌ 无冲突。所有路径唯一 |
+
+---
+
+## P3-7: PyPI v0.7.0 + GitHub Release（~30m）
+
+### 子任务
+
+| ID | 任务 | 验收标准 |
+|----|------|---------|
+| 3.7.1 | `pyproject.toml` version → `0.7.0` | 版本号更新 |
+| 3.7.2 | `CHANGELOG.md` v0.7.0 条目 | 列出所有 P3 变更：Insights B、API 增强、Webhook、Discovery、AutoGen |
+| 3.7.3 | `sdk/atlast_ecp/__init__.py` 版本号同步 | `__version__ = "0.7.0"` |
+| 3.7.4 | Git commit + tag + push | `git tag v0.7.0 && git push --tags` |
+| 3.7.5 | GitHub Release v0.7.0 | 创建 Release → 触发 GitHub Actions trusted publishing |
+| 3.7.6 | 验证 PyPI | `pip install atlast-ecp==0.7.0` 成功 |
+
+---
+
+## P3-8: 全面质量审计（~1.5h）
+
+### 子任务
+
+| ID | 审计项 | 方法 | Pass 标准 |
+|----|--------|------|----------|
+| 3.8.1 | 全测试套件 | `python3 -m pytest sdk/tests/ server/tests/ -q` | 0 failures, 0 errors |
+| 3.8.2 | 跨 SDK hash 一致性 | Python `sha256()` vs Go `Hash()` vs TS `computeHash()` 对相同输入 | 三个 SDK 输出完全相同 |
+| 3.8.3 | Merkle cross-SDK 一致性 | Python `build_merkle_tree()` vs Server `build_merkle_root()` | 已有 3 个测试（BUG-1 fix），再加 1 个大数据量测试 |
+| 3.8.4 | ECP-SPEC 合规 | 所有模块生成的 record 含 7 个必需字段 | `ecp, id, ts, agent, action, in_hash, out_hash` 全部存在 |
+| 3.8.5 | Server-Spec 端点一致性 | 对比 ECP-SERVER-SPEC.md v1.1 与 `server/routes/` 实际路由 | 100% 匹配 |
+| 3.8.6 | Adapter 输出一致性 | LangChain/CrewAI/AutoGen record 格式对比 | 所有 record 结构一致 |
+| 3.8.7 | CERTIFICATE-SCHEMA webhook 对齐 | 对比 `build_webhook_payload()` 输出与 CERTIFICATE-SCHEMA.md Section 3 | 字段 100% 匹配 |
+| 3.8.8 | A2A + Handoff 端点对齐 | `a2a.py` Handoff fields ⊆ API response fields | 全覆盖 |
+| 3.8.9 | Config 完整性 | `~/.atlast/config.json` 支持全部字段 | endpoint, api_key, agent_did, webhook_url, webhook_token |
+| 3.8.10 | CLI 完整性 | `atlast --help` 列出所有命令 | init, record, flush, push, verify, insights, a2a, proxy, run, register, config, discover |
+| 3.8.11 | Import 安全 | `import atlast_ecp` 无副作用，不触发网络请求 | 纯 import 0 网络调用 |
+| 3.8.12 | v0.1↔v1.0 兼容 | Insights/A2A/Server 接受两种 record 格式 | nested (v0.1) + flat (v1.0) 都能处理 |
+
+---
+
+## 全局逻辑碰撞矩阵（P0-P3）
+
+### 数据流完整路径
+
+```
+Agent Code
+  │
+  ├─ Layer 0: atlast proxy ──► intercept HTTP ──► core.create_minimal_record()
+  ├─ Layer 1: @track / record() ──────────────► core.create_record()
+  └─ Layer 2: LangChain/CrewAI/AutoGen adapter ► core.create_record()
+  │
+  ▼
+storage.save_record()  →  ~/.atlast/records/*.jsonl  (本地，P0)
+  │
+  ▼
+atlast flush / push  →  batch.build_merkle_tree()  →  POST /v1/batches  (P1)
+  │
+  ▼
+Server receives  →  merkle.verify_merkle_root()  →  database.save()  (P2-1)
+  │
+  ├─► fire_webhook()  →  POST to webhook_url  (P3-3, fail-open)
+  ├─► GET /v1/insights/*  →  analyze_performance/trends/tools()  (P3-1)
+  ├─► GET /v1/agents/{did}/handoffs  →  DB cross-batch match  (P3-2)
+  └─► GET /.well-known/ecp.json  →  server capability discovery  (P3-4)
+```
+
+### 跨模块依赖图
+
+```
+core.py ◄─── wrap.py, record.py, proxy.py, adapters/*
+  │
+  ▼
+storage.py ◄─── cli.py (flush/push), insights.py (load_records)
+  │
+  ▼
+batch.py ◄─── cli.py (flush), server/merkle.py (must match algorithm!)
+  │
+  ▼
+config.py ◄─── cli.py, batch.py, webhook.py (P3-3)
+  │
+  ▼
+webhook.py (P3-3) ◄─── server/routes/batches.py
+  │
+  ▼
+a2a.py ◄─── cli.py (--a2a), adapters/autogen.py (P3-5), server/routes/agents.py (P3-2)
+  │
+  ▼
+verify.py ◄─── cli.py (verify), server/merkle.py
+```
+
+### 关键不变量（Invariants）
+
+| # | 不变量 | 守护测试 |
+|---|--------|---------|
+| 1 | SDK `build_merkle_tree()` 与 Server `build_merkle_root()` 对相同输入产生相同 root | `test_merkle_cross_sdk_*` (3个) |
+| 2 | 所有 record 包含 7 个必需字段 | 各模块 test + P3-8.4 审计 |
+| 3 | `import atlast_ecp` 无副作用 | P3-8.11 |
+| 4 | v0.1 和 v1.0 record 格式都被接受 | P3-8.12 |
+| 5 | Adapter 无硬依赖（LangChain/CrewAI/AutoGen） | 各 adapter `HAS_*=False` 测试 |
+| 6 | Webhook/网络失败不 crash agent | `test_webhook_fail_open` |
+| 7 | Config 新字段不影响旧配置 | `load_config()` 用 `.get()` |
+
+---
+
+## 执行顺序与依赖关系
+
+```
+P3-1 (Insights B) ─────────────┐
+P3-2 (API Enhancement) ────────┤
+P3-3 (Webhook) ────────────────┤──► P3-6 (Spec v1.1) ──► P3-7 (Release) ──► P3-8 (Audit)
+P3-4 (Discovery) ──────────────┤
+P3-5 (AutoGen Adapter) ────────┘
+```
+
+P3-1 到 P3-5 互相独立，可任意顺序执行。P3-6 汇总所有新端点。P3-7 发布。P3-8 终检。
+
+---
+
+## 预算汇总
+
+| 阶段 | 子任务数 | 估时 | 新测试 |
+|------|---------|------|--------|
+| P3-1 | 12 | 2h | ≥12 |
+| P3-2 | 12 | 2h | ≥10 |
+| P3-3 | 12 | 1.5h | ≥6 |
+| P3-4 | 7 | 1h | ≥4 |
+| P3-5 | 9 | 1.5h | ≥8 |
+| P3-6 | 7 | 0.5h | — |
+| P3-7 | 6 | 0.5h | — |
+| P3-8 | 12 | 1.5h | ≥1 |
+| **合计** | **77** | **~10.5h** | **≥41** |
+
+完成后预计总测试：**456+**（当前 415 + 41 新增）
