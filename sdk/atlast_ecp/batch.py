@@ -16,6 +16,8 @@ import hashlib
 import json
 import threading
 import time
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -165,8 +167,6 @@ def _ensure_agent_registered(identity: dict) -> bool:
         return True
 
     try:
-        import urllib.request
-        import urllib.error
 
         payload = json.dumps({
             "did": identity["did"],
@@ -235,8 +235,6 @@ def upload_merkle_root(
     - flag_counts: {flag: count} (optional)
     """
     try:
-        import urllib.request
-        import urllib.error
 
         body: dict = {
             "merkle_root": merkle_root,
