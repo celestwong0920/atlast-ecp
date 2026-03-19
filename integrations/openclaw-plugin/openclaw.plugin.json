@@ -9,7 +9,7 @@
     "properties": {
       "apiUrl": {
         "type": "string",
-        "description": "ATLAST API endpoint (default: https://api.llachat.com/v1)"
+        "description": "ATLAST ECP server endpoint (set via ATLAST_API_URL env)"
       },
       "apiKey": {
         "type": "string",
@@ -35,7 +35,7 @@
   },
   "uiHints": {
     "apiKey": { "label": "Agent API Key", "sensitive": true, "placeholder": "ak_live_xxx" },
-    "apiUrl": { "label": "API URL", "placeholder": "https://api.llachat.com/v1" },
+    "apiUrl": { "label": "API URL", "placeholder": "https://your-ecp-server.com/v1" },
     "agentName": { "label": "Agent Name", "placeholder": "my-agent" }
   }
 }

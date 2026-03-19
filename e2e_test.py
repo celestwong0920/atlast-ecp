@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 ATLAST ECP — Full End-to-End Closure Test
@@ -7,7 +8,7 @@ import sys, os, json, time, requests
 
 sys.path.insert(0, "/tmp/atlast-ecp/sdk")
 
-API = "https://api.llachat.com/v1"
+API = os.environ.get("ATLAST_API_URL", "https://localhost:8000/v1")
 
 def section(title):
     print(f"\n{'='*60}\n  {title}\n{'='*60}")

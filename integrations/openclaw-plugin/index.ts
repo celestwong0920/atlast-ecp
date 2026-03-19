@@ -13,7 +13,7 @@
  *       "atlast-ecp": {
  *         "enabled": true,
  *         "config": {
- *           "apiUrl": "https://api.llachat.com/v1",
+ *           "apiUrl": process.env.ATLAST_API_URL || "",
  *           "apiKey": "ak_live_xxx"
  *         }
  *       }
@@ -356,7 +356,7 @@ export default function register(api: any) {
     return;
   }
 
-  const apiUrl = config.apiUrl || process.env.ATLAST_API_URL || "https://api.llachat.com/v1";
+  const apiUrl = config.apiUrl || process.env.ATLAST_API_URL || process.env.ATLAST_API_URL || "";
   const apiKey = config.apiKey || process.env.ATLAST_API_KEY;
   const ecpDir = config.ecpDir || process.env.ATLAST_ECP_DIR || join(homedir(), ".ecp");
   const batchInterval = config.batchIntervalMs || 3600000; // 1 hour
@@ -445,7 +445,7 @@ export default function register(api: any) {
           `📊 Recent Records:`,
           recentSummary || "  (no records yet)",
           ``,
-          `🌐 Profile: https://llachat.com/agent/${did}`,
+          `🌐 Agent DID: ${did}`,
         ].join("\n");
 
         return { content: [{ type: "text", text }] };

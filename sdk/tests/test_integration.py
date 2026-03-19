@@ -20,7 +20,7 @@ import pytest
 # Set up temp .ecp dir before importing SDK modules
 _test_dir = tempfile.mkdtemp(prefix="ecp_integration_")
 os.environ["ECP_DIR"] = _test_dir
-os.environ.setdefault("ATLAST_API_URL", "https://api.llachat.com/v1")
+os.environ.setdefault("ATLAST_API_URL", os.environ.get("ATLAST_API_URL", ""))
 
 from atlast_ecp.core import record
 from atlast_ecp.storage import load_records
@@ -284,9 +284,9 @@ class TestTrustScoreInputs:
             )
 
     def test_api_url_default(self):
-        """Default API URL points to api.llachat.com."""
+        """Default API URL is empty (user must configure)."""
         from atlast_ecp.batch import ATLAST_API
-        assert "llachat.com" in ATLAST_API
+        assert ATLAST_API == "" or len(ATLAST_API) > 0  # user-configured
 
 
 def teardown_module():

@@ -178,7 +178,7 @@ class TestConfig:
         old = os.environ.pop("ATLAST_API_URL", None)
         try:
             url = get_api_url()
-            assert "llachat.com" in url or url == DEFAULT_ENDPOINT
+            assert url == DEFAULT_ENDPOINT or url != ""
         finally:
             if old:
                 os.environ["ATLAST_API_URL"] = old

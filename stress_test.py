@@ -3,7 +3,7 @@
 import sys, time, json, requests, concurrent.futures
 sys.path.insert(0, "/tmp/atlast-ecp/sdk")
 
-API = "https://api.llachat.com/v1"
+API = os.environ.get("ATLAST_API_URL", "https://localhost:8000/v1")
 
 print("=" * 60)
 print("  ATLAST ECP STRESS TEST")

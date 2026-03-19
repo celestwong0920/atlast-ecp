@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_ENDPOINT = "https://api.llachat.com/v1"
+DEFAULT_ENDPOINT = ""  # No default — user must configure via ATLAST_API_URL env or atlast init
 CONFIG_DIR = Path.home() / ".atlast"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 

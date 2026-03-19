@@ -34,7 +34,7 @@ Add to your `openclaw.json`:
       "atlast-ecp": {
         "enabled": true,
         "config": {
-          "apiUrl": "https://api.llachat.com/v1",
+          "apiUrl": "https://your-ecp-server.com/v1",
           "apiKey": "ak_live_xxx"
         }
       }
@@ -48,7 +48,7 @@ Add to your `openclaw.json`:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `apiUrl` | `https://api.llachat.com/v1` | ATLAST API endpoint |
+| `apiUrl` | `https://your-ecp-server.com/v1` | ATLAST API endpoint |
 | `apiKey` | — | Agent API key for authenticated uploads |
 | `agentName` | — | Display name for this agent |
 | `batchIntervalMs` | `3600000` (1h) | Batch upload interval |
@@ -64,7 +64,7 @@ Once installed, agents can call `ecp_status` to check their trust recording:
   Agent DID: did:ecp:abc123...
   Total Records: 47
   Storage: /Users/you/.ecp
-  API: https://api.llachat.com/v1
+  API: https://your-ecp-server.com/v1
   
 📊 Recent Records:
   rec_abc123 | 2026-03-17T15:30:00Z | 1200ms | clean

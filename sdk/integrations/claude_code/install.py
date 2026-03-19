@@ -37,7 +37,7 @@ def install():
     print(f"  🔍 View records: atlast view")
     print()
     print("  Your Agent's DID will be generated on first run.")
-    print("  Register your Agent at: https://llachat.com")
+    print("  Register your Agent with an ECP server")
 
 
 def _update_claude_settings():

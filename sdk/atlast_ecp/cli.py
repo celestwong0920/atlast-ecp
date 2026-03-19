@@ -90,6 +90,7 @@ def cmd_view(args: list[str]):
 
 def cmd_verify(args: list[str]):
     """atlast verify <record_id> OR atlast verify --a2a file1.jsonl file2.jsonl ..."""
+    from .config import get_api_url
     if not args:
         print("Usage: atlast verify <record_id>")
         print("       atlast verify --a2a file1.jsonl file2.jsonl [--json]")
@@ -155,7 +156,11 @@ def cmd_verify(args: list[str]):
     else:
         print(f"  🔴 INTEGRITY ISSUE — Chain may be broken")
 
-    print(f"\n  View public proof: https://llachat.com/verify/{record_id}\n")
+    server_url = get_api_url()
+    if server_url:
+        print(f"\n  View on server: {server_url.replace('/v1', '')}/verify/{record_id}\n")
+    else:
+        print(f"\n  Record ID: {record_id}  (configure ATLAST_API_URL to view online)\n")
 
 
 def _cmd_verify_a2a(args: list[str]):
@@ -207,6 +212,7 @@ def _cmd_verify_a2a(args: list[str]):
 
 
 def cmd_stats(args: list[str]):
+    from .config import get_api_url
     """atlast stats"""
     from .storage import load_records, count_records
     from .signals import compute_trust_signals
@@ -239,7 +245,11 @@ def cmd_stats(args: list[str]):
     print(f"  Chain integrity {'✅ 100%' if chain_i == 1.0 else '⚠️ BROKEN'}")
     print(f"  Avg latency     {signals['avg_latency_ms']}ms")
     print()
-    print(f"  Full profile: https://llachat.com  (register to publish)")
+    server_url = get_api_url()
+    if server_url:
+        print(f"  Full profile: {server_url.replace('/v1', '')}  (register to publish)")
+    else:
+        print(f"  Run 'atlast register' to publish your profile to an ECP server")
     print()
 
 
@@ -351,7 +361,9 @@ def cmd_register(args: list[str]):
         error_str = str(e)
         if "409" in error_str:
             print(f"  ✓ Agent already registered: {did}")
-            print(f"  🌐 Profile: https://llachat.com/agent/{did}")
+            server_url = get_api_url()
+            if server_url:
+                print(f"  🌐 Profile: {server_url.replace('/v1', '')}/agent/{did}")
         else:
             print(f"  ⚠️  Backend not available yet (non-fatal): {e}")
             print(f"  📁 Local recording continues. Register later with: atlast register")
@@ -438,7 +450,7 @@ def cmd_init(args: list[str]):
         identity = get_or_create_identity()
         print(f"  Agent DID: {identity['did']}")
         print(f"  Key type: {'ed25519' if identity.get('verified') else 'fallback'}")
-        print(f"\n  Next: atlast register (optional — publish to LLaChat)")
+        print(f"\n  Next: atlast register (optional — publish to an ECP server)")
     else:
         print(f"  Identity: skipped (run 'atlast init' to create DID)")
         print(f"\n  Next: echo '{{\"in\":\"prompt\",\"out\":\"response\"}}' | atlast record")

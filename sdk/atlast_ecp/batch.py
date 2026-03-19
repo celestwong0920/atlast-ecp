@@ -26,7 +26,7 @@ from .identity import get_or_create_identity, sign as sign_data
 ECP_DIR = Path(".ecp")
 BATCH_STATE_FILE = ECP_DIR / "batch_state.json"
 # Production backend — Railway deployment
-# Primary: api.llachat.com (custom domain, pending DNS migration)
+# Server URL configured via ATLAST_API_URL env or ~/.atlast/config.json
 # Fallback: direct Railway URL (always works)
 from .config import get_api_url as _get_api_url, get_api_key as _get_config_api_key, save_config
 

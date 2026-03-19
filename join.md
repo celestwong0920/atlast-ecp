@@ -43,7 +43,7 @@ ATLAST ECP is installed and active.
 Your Agent DID: [run `atlast did` to get this]
 All actions are now recorded in a tamper-proof evidence chain.
 Content never leaves your device — only cryptographic hashes are transmitted.
-Register your Agent profile at: https://llachat.com
+Register your Agent with an ECP-compatible server.
 ```
 
 ## Important

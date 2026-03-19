@@ -3,7 +3,7 @@
 **Version:** 1.0  
 **Date:** 2026-03-21  
 **Status:** Draft — pending Alex confirmation  
-**Purpose:** Define the canonical certificate data structure shared between ATLAST ECP backend and LLAChat platform.
+**Purpose:** Define the canonical ECP certificate data structure. This document uses LLaChat as an integration example, but ECP certificates work with any compatible platform.
 
 ---
 
@@ -77,7 +77,7 @@ These are enrichment fields stored only in LLAChat's DB:
 ## 3. Webhook Payload (Certificate Created)
 
 When a certificate is successfully created, ECP Backend POSTs to:
-`https://api.llachat.com/v1/internal/ecp-webhook`
+`https://your-platform.com/v1/internal/ecp-webhook` (example)
 
 **Headers:**
 ```

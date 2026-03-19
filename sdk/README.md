@@ -51,7 +51,7 @@ Hooks into Claude Code's `PreToolUse` / `PostToolUse` events automatically.
 
 Tell your agent:
 ```
-Read https://llachat.com/join.md and follow the instructions.
+See the registration guide in this repository.
 ```
 
 Or manually: `openclaw plugin add atlast/ecp`

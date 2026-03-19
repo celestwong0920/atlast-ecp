@@ -60,7 +60,7 @@ __all__ = [
     "trigger_batch_upload",
     "run_batch",
     "start_scheduler",
-    # Verification (public API for llachat backend + third parties)
+    # Verification (public API for any ECP-compatible backend)
     "verify_signature",
     "verify_merkle_proof",
     "build_merkle_proof",

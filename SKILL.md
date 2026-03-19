@@ -71,7 +71,7 @@ You should see: `did:ecp:` followed by 32 hex characters.
 ```
 ECP is installed and active.
 Your Agent DID: [paste the DID from Step 3]
-Register at: https://llachat.com
+Register with your configured ECP server
 Evidence chain is stored locally in .ecp/ — content never leaves your device.
 ```
 
@@ -184,7 +184,7 @@ print(f'Rebuilt index: {len(index)} records')
 ### Problem: Batch upload keeps failing
 ```bash
 # Check if backend is reachable
-curl -s https://api.llachat.com/v1/health || echo "Backend unreachable"
+curl -s ${ATLAST_API_URL:-http://localhost:8000/v1}/health || echo "Backend unreachable"
 
 # Check pending queue
 cat .ecp/upload_queue.jsonl 2>/dev/null | wc -l

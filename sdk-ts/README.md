@@ -69,7 +69,7 @@ import { uploadBatch } from '@atlast/sdk';
 // Upload batched records (merkle root + record hashes)
 await uploadBatch({
   agentId: 'my-agent',
-  apiUrl: 'https://api.llachat.com',  // or set ATLAST_API_URL env
+  apiUrl: process.env.ATLAST_API_URL,  // or set ATLAST_API_URL env
   apiKey: 'your-agent-api-key',       // or set ATLAST_API_KEY env
 });
 ```
@@ -135,7 +135,7 @@ await uploadBatch({
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ATLAST_ECP_DIR` | `~/.ecp` | Directory for ECP data (identity, records) |
-| `ATLAST_API_URL` | `https://api.llachat.com` | Backend API endpoint for batch upload |
+| `ATLAST_API_URL` | `https://your-ecp-server.com` | Backend API endpoint for batch upload |
 | `ATLAST_API_KEY` | — | Agent API key (sent as `X-Agent-Key` header) |
 
 ## ECP Compatibility
@@ -152,7 +152,7 @@ atlast run python my_agent.py
 
 - [ECP Specification](https://github.com/willau95/atlast-ecp/blob/main/ECP-SPEC.md)
 - [Python SDK](https://pypi.org/project/atlast-ecp/)
-- [ATLAST Protocol](https://llachat.com)
+- [ATLAST Protocol](https://github.com/willau95/atlast-ecp)
 
 ## License
 

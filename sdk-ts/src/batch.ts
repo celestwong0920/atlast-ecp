@@ -7,7 +7,7 @@ import { collectBatch } from './storage';
 import { loadOrCreateIdentity } from './identity';
 import type { BatchUploadRequest, BatchUploadResponse, ATLASTConfig, ECPRecord } from './types';
 
-const DEFAULT_API_URL = 'https://api.llachat.com';
+const DEFAULT_API_URL = process.env.ATLAST_API_URL || '';  // User must configure
 
 export async function uploadBatch(config: ATLASTConfig): Promise<BatchUploadResponse> {
   const identity = loadOrCreateIdentity(config.agentId);

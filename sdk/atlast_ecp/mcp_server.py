@@ -17,6 +17,15 @@ import sys
 from typing import Any
 
 
+def _server_base() -> str:
+    """Get ECP server base URL (without /v1) from config, or empty string."""
+    from .config import get_api_url
+    url = get_api_url()
+    if not url:
+        return ""
+    return url.replace("/v1", "").rstrip("/")
+
+
 def _get_tools() -> list[dict]:
     """Return MCP tool definitions."""
     return [
@@ -41,7 +50,7 @@ def _get_tools() -> list[dict]:
             "name": "ecp_get_profile",
             "description": (
                 "Get this agent's ATLAST trust signals and profile summary. "
-                "Shows reliability rate, hedge rate, chain integrity, and LLaChat profile link."
+                "Shows reliability rate, hedge rate, chain integrity, and ECP server profile link."
             ),
             "inputSchema": {
                 "type": "object",
@@ -186,7 +195,7 @@ def _tool_ecp_verify(record_id: str) -> dict:
                             if anchor.get("attestation_uid") else None,
             },
             "flags": step.get("flags", []),
-            "public_verify_url": f"https://llachat.com/verify/{record_id}",
+            "public_verify_url": f"{_server_base()}/verify/{record_id}" if _server_base() else None,
         }
     except Exception as e:
         return {"verified": False, "error": str(e)}
@@ -214,7 +223,7 @@ def _tool_ecp_get_profile() -> dict:
                 "chain_integrity": "100%" if signals["chain_integrity"] == 1.0 else "BROKEN",
                 "avg_latency_ms": signals["avg_latency_ms"],
             },
-            "profile_url": f"https://llachat.com (register to publish your profile)",
+            "profile_url": f"{_server_base()}/profile" if _server_base() else "Run 'atlast register' to publish",
         }
     except Exception as e:
         return {"error": str(e)}
@@ -376,7 +385,7 @@ def _tool_ecp_stats() -> dict:
                 "agent_registered": batch_state.get("agent_registered", False),
                 "has_api_key": bool(batch_state.get("agent_api_key")),
             },
-            "profile_url": f"https://llachat.com/agent/{identity['did']}",
+            "profile_url": f"{_server_base()}/agent/{identity['did']}" if _server_base() else None,
         }
     except Exception as e:
         return {"error": str(e)}

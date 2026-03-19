@@ -261,7 +261,7 @@ Optional enhancements:
 ## Reference Implementation
 
 - **Python SDK + CLI**: [github.com/willau95/atlast-ecp](https://github.com/willau95/atlast-ecp)
-- **Live Server**: `https://api.llachat.com` (hosted by LLaChat)
+- **Example Server**: See README for known public ECP servers
 - **Spec**: [ECP-SPEC.md](https://github.com/willau95/atlast-ecp/blob/main/ECP-SPEC.md)
 
 ---

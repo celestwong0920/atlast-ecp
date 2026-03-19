@@ -116,7 +116,7 @@ def register(openclaw_api):
         identity = get_identity()
         print(f"✅ ATLAST ECP active | Agent: {identity['did']}")
         print(f"   Evidence chain: .ecp/ (local, private)")
-        print(f"   Register at: https://llachat.com")
+        print(f"   Register at your ECP server")
         return True
 
     except Exception as e:

@@ -54,7 +54,7 @@ atlast = "atlast_ecp.cli:main"
 atlast-ecp-mcp = "atlast_ecp.mcp_server:run_stdio_server"
 
 [project.urls]
-Homepage = "https://llachat.com"
+Homepage = "https://github.com/willau95/atlast-ecp"
 Repository = "https://github.com/willau95/atlast-ecp"
 Documentation = "https://github.com/willau95/atlast-ecp/blob/main/ECP-SPEC.md"
 

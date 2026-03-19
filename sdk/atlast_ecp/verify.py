@@ -3,7 +3,7 @@ ECP Verification — Public API for verifying ECP records, signatures, and Merkl
 
 These functions are designed to be used by:
 1. atlast-ecp SDK users verifying records locally
-2. Alex's llachat backend (import atlast_ecp and call these directly)
+2. Any ECP-compatible backend (import atlast_ecp and call these directly)
 3. Any third-party verifier
 
 Usage:
