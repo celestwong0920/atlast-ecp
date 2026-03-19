@@ -20,6 +20,7 @@ from .models import HealthResponse
 from .routes.agents import router as agents_router
 from .routes.batches import router as batches_router
 from .routes.leaderboard import router as leaderboard_router
+from .routes.insights import router as insights_router
 
 
 @asynccontextmanager
@@ -51,6 +52,7 @@ app.add_middleware(
 app.include_router(agents_router)
 app.include_router(batches_router)
 app.include_router(leaderboard_router)
+app.include_router(insights_router)
 
 
 @app.get("/health", response_model=HealthResponse)

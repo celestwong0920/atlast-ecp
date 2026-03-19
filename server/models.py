@@ -112,6 +112,84 @@ class LeaderboardResponse(BaseModel):
     agents: list[LeaderboardEntry] = Field(default_factory=list)
 
 
+# ─── Insights (P3-1) ───
+
+
+class ModelPerformance(BaseModel):
+    count: int
+    avg_ms: int
+    p95_ms: int
+    max_ms: int
+
+
+class PerformanceResponse(BaseModel):
+    total_records: int = 0
+    avg_latency_ms: int = 0
+    p50_latency_ms: int = 0
+    p95_latency_ms: int = 0
+    max_latency_ms: int = 0
+    success_rate: float = 1.0
+    throughput_per_min: float = 0.0
+    by_model: dict[str, ModelPerformance] = Field(default_factory=dict)
+
+
+class TrendBucket(BaseModel):
+    period: str
+    record_count: int
+    avg_latency_ms: int
+    error_count: int
+
+
+class TrendsResponse(BaseModel):
+    bucket_size: str = "day"
+    buckets: list[TrendBucket] = Field(default_factory=list)
+
+
+class ToolUsage(BaseModel):
+    name: str
+    count: int
+    avg_duration_ms: int
+    error_rate: float
+
+
+class ToolsResponse(BaseModel):
+    total_tool_calls: int = 0
+    tools: list[ToolUsage] = Field(default_factory=list)
+
+
+# ─── Pagination (P3-2) ───
+
+
+class PaginatedBatchResponse(BaseModel):
+    total: int
+    page: int
+    limit: int
+    items: list[dict] = Field(default_factory=list)
+
+
+class BatchDetailResponse(BaseModel):
+    batch_id: str
+    agent_id: str
+    batch_ts: int
+    merkle_root: str
+    record_count: int
+    flag_counts: Optional[dict] = None
+    records: list[dict] = Field(default_factory=list)
+
+
+class HandoffEntry(BaseModel):
+    source_agent: str
+    source_record_id: str
+    target_agent: str
+    target_record_id: str
+    hash_value: str
+    source_ts: int = 0
+    target_ts: int = 0
+    valid: bool = True
+    source_batch_id: Optional[str] = None
+    target_batch_id: Optional[str] = None
+
+
 # ─── Health ───
 
 

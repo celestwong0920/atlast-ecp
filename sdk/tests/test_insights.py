@@ -194,3 +194,149 @@ class TestInsightsCLI:
         assert r.returncode == 0
         data = json.loads(r.stdout)
         assert data["summary"]["total_records"] >= 1
+
+
+# ── P3-1: Sub-function tests ──────────────────────────────────────────────
+
+from atlast_ecp.insights import (
+    analyze_performance,
+    analyze_trends,
+    analyze_tools,
+    format_performance_report,
+    format_trends_report,
+    format_tools_report,
+)
+
+# Sample records for sub-function testing
+_SAMPLE_RECORDS = [
+    {"ecp": "1.0", "id": "rec_01", "ts": 1710000000000, "agent": "did:ecp:aaa",
+     "action": "llm_call", "in_hash": "sha256:a1", "out_hash": "sha256:b1",
+     "meta": {"model": "gpt-4", "latency_ms": 500, "tokens_in": 100, "tokens_out": 200, "flags": []}},
+    {"ecp": "1.0", "id": "rec_02", "ts": 1710000060000, "agent": "did:ecp:aaa",
+     "action": "tool_call", "in_hash": "sha256:a2", "out_hash": "sha256:b2",
+     "meta": {"tool": "web_search", "duration_ms": 1200, "flags": []}},
+    {"ecp": "1.0", "id": "rec_03", "ts": 1710000120000, "agent": "did:ecp:aaa",
+     "action": "llm_call", "in_hash": "sha256:a3", "out_hash": "sha256:b3",
+     "meta": {"model": "gpt-4", "latency_ms": 800, "tokens_in": 150, "tokens_out": 300, "flags": ["error"]}},
+    {"ecp": "1.0", "id": "rec_04", "ts": 1710086400000, "agent": "did:ecp:bbb",
+     "action": "llm_call", "in_hash": "sha256:a4", "out_hash": "sha256:b4",
+     "meta": {"model": "claude-3", "latency_ms": 300, "flags": []}},
+    {"ecp": "1.0", "id": "rec_05", "ts": 1710086460000, "agent": "did:ecp:bbb",
+     "action": "tool_call", "in_hash": "sha256:a5", "out_hash": "sha256:b5",
+     "meta": {"tool": "web_search", "duration_ms": 900, "flags": ["error"]}},
+]
+
+
+class TestAnalyzePerformance:
+    def test_basic(self):
+        r = analyze_performance(_SAMPLE_RECORDS)
+        assert r["total_records"] == 5
+        assert r["avg_latency_ms"] > 0
+        assert r["p50_latency_ms"] > 0
+        assert r["p95_latency_ms"] >= r["p50_latency_ms"]
+        assert r["max_latency_ms"] >= r["p95_latency_ms"]
+        assert 0 < r["success_rate"] < 1.0  # 2 errors out of 5
+        assert r["throughput_per_min"] >= 0  # can be tiny with spread-out records
+        assert "gpt-4" in r["by_model"]
+        assert "claude-3" in r["by_model"]
+
+    def test_empty(self):
+        r = analyze_performance([])
+        assert r["total_records"] == 0
+        assert r["success_rate"] == 1.0
+        assert r["by_model"] == {}
+
+    def test_success_rate(self):
+        r = analyze_performance(_SAMPLE_RECORDS)
+        # 2 errors out of 5 records
+        assert r["success_rate"] == 0.6
+
+    def test_format(self):
+        r = analyze_performance(_SAMPLE_RECORDS)
+        text = format_performance_report(r)
+        assert "Performance" in text
+        assert "gpt-4" in text
+
+
+class TestAnalyzeTrends:
+    def test_day_buckets(self):
+        r = analyze_trends(_SAMPLE_RECORDS, bucket="day")
+        assert r["bucket_size"] == "day"
+        assert len(r["buckets"]) == 2  # Two different days
+
+    def test_hour_buckets(self):
+        r = analyze_trends(_SAMPLE_RECORDS, bucket="hour")
+        assert r["bucket_size"] == "hour"
+        assert len(r["buckets"]) >= 2
+
+    def test_empty(self):
+        r = analyze_trends([])
+        assert r["buckets"] == []
+
+    def test_error_counted(self):
+        r = analyze_trends(_SAMPLE_RECORDS, bucket="day")
+        total_errors = sum(b["error_count"] for b in r["buckets"])
+        assert total_errors == 2
+
+    def test_format(self):
+        r = analyze_trends(_SAMPLE_RECORDS)
+        text = format_trends_report(r)
+        assert "Trends" in text
+
+    def test_v01_records(self):
+        """v0.1 records with ISO timestamp should work."""
+        recs = [{"version": "0.1", "timestamp": "2026-03-20T00:00:00Z",
+                 "agent_id": "a1", "execution": [{"step": 1, "action": "llm", "duration_ms": 100}]}]
+        r = analyze_trends(recs)
+        assert r["bucket_size"] == "day"
+        assert len(r["buckets"]) == 1
+
+
+class TestAnalyzeTools:
+    def test_basic(self):
+        r = analyze_tools(_SAMPLE_RECORDS)
+        assert r["total_tool_calls"] == 2
+        assert len(r["tools"]) == 1  # web_search
+        assert r["tools"][0]["name"] == "web_search"
+        assert r["tools"][0]["count"] == 2
+
+    def test_empty(self):
+        r = analyze_tools([])
+        assert r["total_tool_calls"] == 0
+        assert r["tools"] == []
+
+    def test_error_rate(self):
+        r = analyze_tools(_SAMPLE_RECORDS)
+        # 1 error out of 2 web_search calls
+        assert r["tools"][0]["error_rate"] == 0.5
+
+    def test_format(self):
+        r = analyze_tools(_SAMPLE_RECORDS)
+        text = format_tools_report(r)
+        assert "Tool Usage" in text
+        assert "web_search" in text
+
+    def test_no_tool_calls(self):
+        """Records with only llm_call should return 0 tool calls."""
+        recs = [{"ecp": "1.0", "id": "r1", "ts": 1710000000000, "agent": "a",
+                 "action": "llm_call", "in_hash": "sha256:x", "out_hash": "sha256:y",
+                 "meta": {"model": "gpt-4", "latency_ms": 100}}]
+        r = analyze_tools(recs)
+        assert r["total_tool_calls"] == 0
+
+
+class TestAnalyzeRecordsBackwardCompat:
+    """Ensure analyze_records() still returns the exact same keys after refactor."""
+
+    def test_keys_unchanged(self):
+        r = analyze_records(_SAMPLE_RECORDS)
+        expected_keys = {"summary", "latency_by_model", "model_usage", "flags",
+                         "error_count", "high_latency_count", "recommendations"}
+        assert set(r.keys()) == expected_keys
+
+    def test_summary_keys_unchanged(self):
+        r = analyze_records(_SAMPLE_RECORDS)
+        expected = {"total_records", "unique_agents", "agents", "action_breakdown",
+                    "time_span_hours", "avg_latency_ms", "total_tokens_in",
+                    "total_tokens_out", "total_tokens"}
+        assert set(r["summary"].keys()) == expected
