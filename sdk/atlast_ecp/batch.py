@@ -128,7 +128,8 @@ def collect_batch(since_ts: Optional[int] = None) -> tuple[list[dict], list[str]
 def _build_record_hashes_payload(records: list[dict]) -> list[dict]:
     """
     Build the record_hashes list for the batch upload payload.
-    Each entry: {id, hash, flags} — matches backend RecordHashEntry model.
+    Each entry: {id, hash, flags, in_hash?, out_hash?} — matches backend RecordHashEntry model.
+    in_hash/out_hash are SHA-256 hashes of input/output data (optional, format: sha256:{hex}).
     """
     entries = []
     for r in records:
@@ -137,7 +138,15 @@ def _build_record_hashes_payload(records: list[dict]) -> list[dict]:
         flags = r.get("step", {}).get("flags", [])
         # Only include records with valid ids and hashes
         if record_id.startswith("rec_") and chain_hash.startswith("sha256:"):
-            entries.append({"id": record_id, "hash": chain_hash, "flags": flags})
+            entry = {"id": record_id, "hash": chain_hash, "flags": flags}
+            # Include in_hash/out_hash if present (ECP v1.0 flat format)
+            in_hash = r.get("in_hash") or r.get("step", {}).get("in_hash")
+            out_hash = r.get("out_hash") or r.get("step", {}).get("out_hash")
+            if in_hash and in_hash.startswith("sha256:"):
+                entry["in_hash"] = in_hash
+            if out_hash and out_hash.startswith("sha256:"):
+                entry["out_hash"] = out_hash
+            entries.append(entry)
     return entries
 
 
