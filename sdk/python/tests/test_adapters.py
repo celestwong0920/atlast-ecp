@@ -468,3 +468,382 @@ class TestAutoGenAdapter:
         mw.wrap(agent)
         result = agent.generate_reply()  # no messages
         assert result is None  # should not crash
+
+
+# ─── LangChain Edge Case Tests ────────────────────────────────────────────────
+
+class TestLangChainEdgeCases:
+    """Additional edge-case tests for ATLASTCallbackHandler."""
+
+    def _get_handler(self, **kwargs):
+        from atlast_ecp.adapters.langchain import ATLASTCallbackHandler
+        return ATLASTCallbackHandler(**kwargs)
+
+    def test_retriever_start_end_creates_record(self):
+        """on_retriever_start/end creates a tool_call record."""
+        handler = self._get_handler(agent="test-retriever")
+        run_id = uuid4()
+
+        handler.on_retriever_start(
+            serialized={"name": "faiss"},
+            query="What is the capital of France?",
+            run_id=run_id,
+        )
+
+        doc1 = MagicMock()
+        doc1.page_content = "Paris is the capital of France."
+        doc2 = MagicMock()
+        doc2.page_content = "France's largest city is also its capital."
+
+        handler.on_retriever_end(documents=[doc1, doc2], run_id=run_id)
+
+        assert handler.record_count == 1
+        records = load_records(limit=10)
+        rec = records[-1]
+        assert rec["action"] == "tool_call"
+
+    def test_retriever_end_with_non_document_objects(self):
+        """on_retriever_end handles docs without page_content attribute."""
+        handler = self._get_handler(agent="test-raw-docs")
+        run_id = uuid4()
+
+        handler.on_retriever_start(serialized={}, query="test query", run_id=run_id)
+        # Pass plain strings instead of Document objects
+        handler.on_retriever_end(documents=["raw text 1", "raw text 2"], run_id=run_id)
+
+        assert handler.record_count == 1
+
+    def test_chat_model_start_with_nested_messages(self):
+        """on_chat_model_start handles nested message lists."""
+        handler = self._get_handler(agent="test-nested-msg")
+        run_id = uuid4()
+
+        system_msg = MagicMock()
+        system_msg.type = "system"
+        system_msg.content = "You are a helpful assistant."
+
+        human_msg = MagicMock()
+        human_msg.type = "human"
+        human_msg.content = "Tell me about ECP."
+
+        ai_msg = MagicMock()
+        ai_msg.type = "ai"
+        ai_msg.content = "Previous response."
+
+        # messages is a list of lists (batch of conversations)
+        handler.on_chat_model_start(
+            serialized={"kwargs": {"model_name": "gpt-4o"}},
+            messages=[[system_msg, human_msg, ai_msg]],
+            run_id=run_id,
+        )
+
+        mock_resp = MagicMock()
+        mock_gen = MagicMock()
+        mock_gen.text = "ECP is the Evidence Chain Protocol."
+        mock_resp.generations = [[mock_gen]]
+        mock_resp.llm_output = None
+
+        handler.on_llm_end(response=mock_resp, run_id=run_id)
+        assert handler.record_count == 1
+
+    def test_chat_model_start_with_dict_messages(self):
+        """on_chat_model_start handles dict-style messages (no .content attr)."""
+        handler = self._get_handler(agent="test-dict-msgs")
+        run_id = uuid4()
+
+        handler.on_chat_model_start(
+            serialized={"kwargs": {}},
+            messages=[[{"role": "user", "content": "Hello dict message"}]],
+            run_id=run_id,
+        )
+
+        mock_resp = MagicMock()
+        mock_gen = MagicMock()
+        mock_gen.text = "Hi there"
+        mock_resp.generations = [[mock_gen]]
+        mock_resp.llm_output = None
+
+        handler.on_llm_end(response=mock_resp, run_id=run_id)
+        assert handler.record_count == 1
+
+    def test_llm_end_empty_response_text(self):
+        """on_llm_end with empty generation text still creates a record."""
+        handler = self._get_handler(agent="test-empty-resp")
+        run_id = uuid4()
+
+        handler.on_llm_start({"kwargs": {"model": "gpt-4"}}, ["prompt"], run_id=run_id)
+
+        mock_resp = MagicMock()
+        mock_gen = MagicMock()
+        mock_gen.text = ""
+        mock_gen.message = MagicMock()
+        mock_gen.message.content = ""
+        mock_resp.generations = [[mock_gen]]
+        mock_resp.llm_output = None
+
+        handler.on_llm_end(response=mock_resp, run_id=run_id)
+        assert handler.record_count == 1
+
+    def test_model_extraction_from_invocation_params(self):
+        """Model name extracted from kwargs.invocation_params fallback."""
+        handler = self._get_handler(agent="test-model-extract")
+        run_id = uuid4()
+
+        # serialized has no model, but invocation_params does
+        handler.on_llm_start(
+            serialized={"kwargs": {}},
+            prompts=["test"],
+            run_id=run_id,
+            invocation_params={"model": "claude-haiku-4-5"},
+        )
+
+        mock_resp = MagicMock()
+        mock_gen = MagicMock()
+        mock_gen.text = "ok"
+        mock_resp.generations = [[mock_gen]]
+        mock_resp.llm_output = None
+        handler.on_llm_end(response=mock_resp, run_id=run_id)
+
+        assert handler.record_count == 1
+        records = load_records(limit=10)
+        rec = records[-1]
+        # Model comes from invocation_params
+        assert rec["meta"]["model"] in ("claude-haiku-4-5", "unknown")
+
+    def test_model_extraction_from_serialized_kwargs_model(self):
+        """Model extracted from serialized.kwargs.model (not model_name)."""
+        handler = self._get_handler(agent="test-model-kw")
+        run_id = uuid4()
+
+        handler.on_llm_start(
+            serialized={"kwargs": {"model": "gpt-3.5-turbo"}},
+            prompts=["test"],
+            run_id=run_id,
+        )
+
+        mock_resp = MagicMock()
+        mock_gen = MagicMock()
+        mock_gen.text = "ok"
+        mock_resp.generations = [[mock_gen]]
+        mock_resp.llm_output = None
+        handler.on_llm_end(response=mock_resp, run_id=run_id)
+
+        records = load_records(limit=10)
+        assert records[-1]["meta"]["model"] == "gpt-3.5-turbo"
+
+    def test_concurrent_calls_cleanup(self):
+        """After all calls complete, _inflight dict is empty."""
+        handler = self._get_handler(agent="test-cleanup")
+        ids = [uuid4() for _ in range(4)]
+
+        for i, rid in enumerate(ids):
+            handler.on_llm_start({"kwargs": {}}, [f"p{i}"], run_id=rid)
+
+        mock_resp = MagicMock()
+        mock_gen = MagicMock()
+        mock_gen.text = "done"
+        mock_resp.generations = [[mock_gen]]
+        mock_resp.llm_output = None
+
+        for rid in ids:
+            handler.on_llm_end(response=mock_resp, run_id=rid)
+
+        assert len(handler._inflight) == 0
+        assert handler.record_count == 4
+
+    def test_retriever_end_with_empty_documents(self):
+        """Retriever returning zero documents still creates a record."""
+        handler = self._get_handler(agent="test-empty-retriever")
+        run_id = uuid4()
+
+        handler.on_retriever_start(serialized={}, query="obscure query", run_id=run_id)
+        handler.on_retriever_end(documents=[], run_id=run_id)
+
+        assert handler.record_count == 1
+
+
+# ─── CrewAI Edge Case Tests ───────────────────────────────────────────────────
+
+class TestCrewAIEdgeCases:
+    """Additional edge-case tests for ATLASTCrewCallback."""
+
+    def _get_callback(self, **kwargs):
+        from atlast_ecp.adapters.crewai import ATLASTCrewCallback
+        return ATLASTCrewCallback(**kwargs)
+
+    def test_on_task_start_latency_tracking(self):
+        """on_task_start stores start time; subsequent call can read it."""
+        cb = self._get_callback(agent="latency-crew")
+        task = "Analyze Q4 financials"
+
+        cb.on_task_start(task)
+        assert task[:100] in cb._task_starts
+        assert cb._task_starts[task[:100]] > 0
+
+    def test_on_task_start_truncates_long_key(self):
+        """on_task_start truncates keys to 100 chars to avoid memory bloat."""
+        cb = self._get_callback(agent="trunc-crew")
+        long_desc = "X" * 200
+        cb.on_task_start(long_desc)
+        assert long_desc[:100] in cb._task_starts
+        assert long_desc not in cb._task_starts
+
+    def test_nested_dict_output(self):
+        """Dict output with nested values is handled without crash."""
+        cb = self._get_callback(agent="nested-dict-crew")
+
+        cb({
+            "description": "Complex nested task",
+            "raw": {"result": "value", "score": 0.95},  # raw is a dict, not str
+            "metadata": {"source": "web"},
+        })
+
+        assert cb.record_count == 1
+
+    def test_task_output_with_none_agent_field(self):
+        """TaskOutput with agent=None uses the callback's base agent name."""
+        cb = self._get_callback(agent="base-crew")
+
+        mock_output = MagicMock()
+        mock_output.description = "Task with no agent attribution"
+        mock_output.raw = "Output here"
+        mock_output.agent = None
+
+        cb(mock_output)
+
+        assert cb.record_count == 1
+        records = load_records(limit=10)
+        rec = records[-1]
+        # When agent is None/falsy, should use base agent name
+        assert rec["agent"] == "base-crew"
+
+    def test_task_output_with_output_attr(self):
+        """TaskOutput with .output instead of .raw is handled."""
+        cb = self._get_callback(agent="output-crew")
+
+        mock_output = MagicMock(spec=["description", "output"])
+        mock_output.description = "Task using .output attr"
+        mock_output.output = "Result via .output"
+
+        cb(mock_output)
+        assert cb.record_count == 1
+
+    def test_step_callback_string_output(self):
+        """step_callback handles plain string (fallback path)."""
+        cb = self._get_callback(agent="str-step-crew")
+
+        # String has no .tool, .output attributes — hits the else branch
+        cb.step_callback("step result as plain string")
+        assert cb.record_count == 1
+
+
+# ─── AutoGen Edge Case Tests ──────────────────────────────────────────────────
+
+class TestAutoGenEdgeCases:
+    """Additional edge-case tests for AutoGen adapter."""
+
+    def test_wrap_agent_without_name(self):
+        """wrap() handles agent with no .name attribute gracefully."""
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+
+        class NamelessAgent:
+            def generate_reply(self, messages=None, sender=None, **kwargs):
+                return "nameless reply"
+
+        agent = NamelessAgent()
+        mw = ATLASTAutoGenMiddleware(agent_id="explicit-id")
+        mw.wrap(agent)
+
+        result = agent.generate_reply(messages=[{"content": "hello"}])
+        assert result == "nameless reply"
+        assert len(mw.records) == 1
+
+    def test_wrap_agent_without_generate_reply(self):
+        """wrap() on an object without generate_reply is a no-op."""
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+
+        class WeirdObject:
+            name = "weird"
+
+        obj = WeirdObject()
+        mw = ATLASTAutoGenMiddleware(agent_id="test")
+        result = mw.wrap(obj)
+        # Should return the object unchanged, no crash
+        assert result is obj
+        assert len(mw.records) == 0
+
+    def test_multiple_wraps_stack_records(self):
+        """Wrapping the same agent twice accumulates records from both wraps."""
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+
+        class MockAgent:
+            name = "double-wrapped"
+            def generate_reply(self, messages=None, sender=None, **kwargs):
+                return "response"
+
+        agent = MockAgent()
+        mw1 = ATLASTAutoGenMiddleware(agent_id="mw1")
+        mw2 = ATLASTAutoGenMiddleware(agent_id="mw2")
+
+        mw1.wrap(agent)
+        mw2.wrap(agent)
+
+        agent.generate_reply(messages=[{"content": "test"}])
+
+        # Both middleware instances record
+        assert len(mw1.records) == 1
+        assert len(mw2.records) == 1
+
+    def test_empty_messages_list(self):
+        """generate_reply with empty messages list doesn't crash."""
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+
+        class MockAgent:
+            name = "empty-msg-agent"
+            def generate_reply(self, messages=None, sender=None, **kwargs):
+                return "ok"
+
+        agent = MockAgent()
+        mw = ATLASTAutoGenMiddleware(agent_id="test")
+        mw.wrap(agent)
+
+        result = agent.generate_reply(messages=[])
+        assert result == "ok"
+        assert len(mw.records) == 1
+
+    def test_register_atlast_uses_agent_name_as_id(self):
+        """register_atlast() defaults to agent.name when agent_id not given."""
+        from atlast_ecp.adapters.autogen import register_atlast
+
+        class MockAgent:
+            name = "auto-named-agent"
+            def generate_reply(self, messages=None, sender=None, **kwargs):
+                return "hi"
+
+        agent = MockAgent()
+        mw = register_atlast(agent)
+        assert mw.agent_id == "auto-named-agent"
+
+    def test_no_handoff_when_sender_is_self(self):
+        """No handoff record when sender and agent have the same name."""
+        from atlast_ecp.adapters.autogen import ATLASTAutoGenMiddleware
+
+        class MockAgent:
+            name = "self-agent"
+            def generate_reply(self, messages=None, sender=None, **kwargs):
+                return "self-reply"
+
+        class SameSender:
+            name = "self-agent"
+
+        agent = MockAgent()
+        mw = ATLASTAutoGenMiddleware(agent_id="self-agent")
+        mw.wrap(agent)
+
+        agent.generate_reply(
+            messages=[{"content": "hello"}],
+            sender=SameSender(),
+        )
+
+        assert len(mw.records) == 1
+        assert mw.records[0]["action"] == "autogen_reply"  # not handoff
