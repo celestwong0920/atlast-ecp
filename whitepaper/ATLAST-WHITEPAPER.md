@@ -126,6 +126,8 @@ Without a trust standard, the agent economy will reach a systemic risk point com
 
 ATLAST Protocol is the first infrastructure designed to prevent this failure mode.
 
+**In one sentence:** ATLAST is to agent trust what SSL Certificate Authorities are to web security and what FICO is to consumer credit — the verification layer that an entire economy requires before it can function at scale.
+
 ---
 
 ## 2. The Agent Trust Crisis
@@ -153,7 +155,7 @@ The distinction between a *log* and *evidence* is consequential. A piece of evid
 | **Authenticity** | The event actually occurred as described | ⚠️ Likely, but no cryptographic proof | ✅ SHA-256 hash committed at event time |
 | **Integrity** | The content has not been altered since recording | ❌ Database records can be modified by any admin | ✅ Hash chain + blockchain anchor makes tampering detectable |
 | **Attribution** | A specific, identifiable actor produced it | ⚠️ We know which API key, but cannot prove the agent itself generated the record | ✅ Ed25519 digital signature by agent's private key |
-| **Temporality** | It occurred at a specific, verifiable time | ⚠️ Server timestamps can be falsified | ✅ Blockchain timestamp (independently verifiable, unfalsifiable) |
+| **Temporality** | It occurred at a specific, verifiable time | ⚠️ Server timestamps can be falsified | ✅ Blockchain timestamp (independently verifiable; admissibility supported by eIDAS 2.0 Art. 41.2 in EU, and recognized under US Federal Rules of Evidence 901(b)(9) as self-authenticating electronic records when properly documented) |
 
 Current agent logging systems — whether commercial (LangSmith, Datadog LLM Observability) or open-source (Langfuse, custom logging) — satisfy **zero** of these four conditions with cryptographic certainty. They produce *records*: useful for debugging, useless for accountability.
 
@@ -356,6 +358,17 @@ The recording layer is invisible to both the agent and the user under all condit
 The protocol specification is published under CC BY 4.0. The reference implementation (SDK and server) is MIT-licensed. Blockchain anchors are on public chains readable by anyone. No vendor lock-in exists at any layer.
 
 Self-hosting is a first-class deployment option. Organizations can run the entire ATLAST stack on their own infrastructure, paying only raw compute and storage costs. The protocol is designed so that **ATLAST the organization could disappear, and every evidence chain ever created would remain independently verifiable.**
+
+**The Trust Closure Problem: Why Trust ATLAST?**
+
+A protocol that asks users to trust it must first answer: *"Why should I trust you?"* ATLAST resolves this through structural elimination of trust requirements:
+
+1. **You don't need to trust ATLAST's server.** The server stores only hashes. Even if compromised, no content is exposed. Even if ATLAST fabricates server-side data, it cannot produce a hash that matches your locally stored content — verification is independent.
+2. **You don't need to trust ATLAST's code.** The SDK, server, and protocol specification are open-source (MIT license). Anyone can audit the code, compile from source, and verify that the SDK does exactly what it claims — hash locally, transmit fingerprints only, fail-open.
+3. **You don't need to trust ATLAST's blockchain operations.** Merkle roots are written to EAS on Base, a public blockchain. Anyone can query the on-chain attestation directly through Base RPC endpoints — without touching ATLAST's infrastructure at all.
+4. **You can run everything yourself.** Self-hosting eliminates ATLAST from the trust chain entirely. Your SDK → your server → public blockchain. ATLAST provides the software; you own the deployment.
+
+The only trust assumption remaining: the correctness of SHA-256 and Ed25519, which are federal and international standards (FIPS 180-4, RFC 8032) vetted by decades of cryptographic research. This is the same trust assumption underlying TLS, Bitcoin, and every digital signature on the internet.
 
 ---
 
@@ -961,14 +974,27 @@ graph TB
 TrustScore(agent) = w₁·B(agent) + w₂·C(agent) + w₃·T(agent) + w₄·E(agent)
 
 Where:
-  w = {0.40, 0.25, 0.20, 0.15}    (Σwᵢ = 1.0)
+  w₁ = 0.40, w₂ = 0.25, w₃ = 0.20, w₄ = 0.15    (Σwᵢ = 1.0)
 
-  B(agent) = 1 - α·error_rate - β·retry_rate - γ·incomplete_rate
-  C(agent) = similarity(outputs(t), outputs(t-Δ)) for similar inputs
-  T(agent) = chain_integrity × coverage_ratio
-  E(agent) = normalized(owner_ratings + verifications + community)
+  B(agent) = 1 - 0.45·error_rate - 0.35·retry_rate - 0.20·incomplete_rate
+             (weights reflect severity: errors > retries > incomplete)
+
+  C(agent) = (1/|P|) Σ cosine_sim(out_hash_set(pᵢ, t), out_hash_set(pᵢ, t-Δ))
+             for all similar-input pairs P over time window Δ = 30 days
+
+  T(agent) = chain_integrity^2 × coverage_ratio
+             (squared to penalize low integrity disproportionately:
+              99% → 0.98, 90% → 0.81, 70% → 0.49)
+
+  E(agent) = 0.40·owner_score + 0.40·verification_score + 0.20·community_score
+             (third-party verifications weighted equally with owner feedback;
+              community signals capped at 20% to limit brigading risk)
 
   Final score = round(TrustScore × 1000)  ∈ [0, 1000]
+
+Note: Exact coefficients are tunable and will be refined through empirical
+calibration as the network scales. The architecture — passive signals only,
+no self-reporting — is fixed. The weights are parameters.
 ```
 
 > **Case Study 2: Agent Marketplace Selection**
@@ -1018,6 +1044,60 @@ Today, FICO scores gate access to financial products. Tomorrow, Trust Scores wil
 | **Regulatory compliance** | Organizations demonstrate due diligence by selecting agents above a Trust Score threshold. |
 
 Unlike human credit scores, every point of an ATLAST Trust Score is backed by independently verifiable evidence. It is a credit system built on mathematics, not on trust in reporting institutions.
+
+### 7.6 Work Certificates: Verifiable Proof of Agent Output
+
+Trust Scores measure general reliability. **Work Certificates** prove specific deliverables — a verifiable record that a particular agent performed a particular task, with independently confirmable evidence.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│            ATLAST VERIFIED WORK CERTIFICATE               │
+│                                                          │
+│  Work:     Market Analysis Report — Q1 2026              │
+│  Agent:    Alex CTO Partner (Trust Score: 847)           │
+│  Date:     2026-03-11 17:23 UTC                          │
+│  Steps:    14 ECP records · 6 tool calls · 3 sources     │
+│  Chain:    ✅ 100% integrity (14/14 records valid)       │
+│  On-chain: ✅ Base (EAS) · attestation: 0x7f3a...       │
+│                                                          │
+│  Verify:   llachat.com/verify/abc123                     │
+│  ┌──────────────────────────────────────────────┐        │
+│  │  [Scan QR to verify independently]           │        │
+│  └──────────────────────────────────────────────┘        │
+│                                                          │
+│  This certificate proves the above work was performed    │
+│  by the identified agent at the stated time.             │
+│  Content hashes match on-chain records.                  │
+│  No content was modified after creation.                 │
+└──────────────────────────────────────────────────────────┘
+```
+
+**How Work Certificates are generated:**
+
+1. Agent completes a task (or set of related tasks) during a session
+2. All ECP records from the session are aggregated
+3. The SDK generates a certificate containing: task summary, agent DID, Trust Score at time of work, number of ECP records, chain integrity, and on-chain attestation reference
+4. The certificate is signed by the agent's Ed25519 key
+5. A shareable verification URL is generated
+
+**How Work Certificates are verified:**
+
+A client who receives a certificate visits the verification URL. The verification page independently:
+1. Confirms the certificate hash matches the ATLAST-stored hash
+2. Confirms the Merkle inclusion proof against the on-chain root
+3. Confirms the Ed25519 signature matches the claimed agent DID
+4. Displays the agent's current Trust Score and chain integrity
+
+**No trust in the agent or its owner is required.** The verification is entirely mathematical.
+
+**Why Work Certificates matter commercially:**
+
+- **Freelance agents** share certificates with clients as proof of work quality — analogous to a portfolio, but where every item is cryptographically verified
+- **Enterprise agents** attach certificates to internal reports for compliance documentation
+- **Agent marketplaces** display certificate counts and verification rates as hiring signals
+- **Each verification event contributes to Trust Score** — creating a virtuous cycle where sharing work → more verifications → higher Trust Score → more work
+
+Work Certificates transform agent output from *claims* into *evidence*. In a world where any agent can claim to have performed any task, certificates backed by ECP chains are the difference between "trust me" and "verify me."
 
 ---
 
@@ -1150,7 +1230,7 @@ ECP's Commit-Reveal architecture is **natively GDPR-compliant**:
 - **Data Minimization (Art. 5(1)(c)):** Only hashes are transmitted; content stays local. This is the minimum data necessary for verification.
 - **Right to Erasure (Art. 17):** Users can delete local `.ecp/` records. Server-side hashes are meaningless without the original content — they cannot be used to reconstruct personal data.
 - **Data Protection by Design (Art. 25):** Privacy is architectural, not policy-based. ATLAST *cannot* access user content even if legally compelled — the data was never transmitted.
-- **Lawful Basis (Art. 6):** Hash processing is based on legitimate interest in verification. Since hashes do not constitute personal data (they cannot identify any individual), GDPR's strictest requirements on personal data processing do not apply to the transmitted data.
+- **Lawful Basis (Art. 6):** Hash processing is based on legitimate interest in verification. SHA-256 hashes are one-way functions — content cannot be reconstructed from a hash. However, we adopt a conservative interpretation: if metadata patterns (timestamps, frequency, agent DID) could theoretically contribute to identifying an individual when combined with external datasets, ATLAST treats its server-side data as pseudonymous data under Art. 4(5) and applies appropriate safeguards (access controls, retention limits, DPA availability). This conservative approach ensures compliance regardless of jurisdictional interpretation.
 
 ---
 
@@ -1238,6 +1318,85 @@ LLaChat (the first application built on ATLAST) implements this as "the professi
 **Agent-to-Agent (A2A) Trust**
 
 When agents hire other agents for sub-tasks, they need programmatic trust evaluation. Trust Score provides a machine-readable reputation signal that enables automated delegation decisions. An agent can query another agent's Trust Score and behavioral history before delegating sensitive work — all via standard API calls.
+
+### 11.5 Business Model and Long-Term Sustainability
+
+A protocol claiming "$0 forever" for users must answer a fundamental question: *how does the organization sustain itself long enough to achieve critical mass?*
+
+ATLAST's sustainability model follows the pattern of successful protocol-first businesses — companies that gave away the standard and monetized the ecosystem it created:
+
+| Precedent | Free Layer | Revenue Layer |
+|-----------|-----------|--------------|
+| **Google** | Free search, free Chrome, free Android | Advertising on the platform |
+| **Stripe** | Free developer tools, open APIs | Transaction fees on payments |
+| **Let's Encrypt** | Free SSL certificates | Funded by ISRG (nonprofit) + sponsors who benefit from a secure web |
+| **Linux Foundation** | Free operating system | Corporate memberships, training, certification |
+| **ATLAST** | Free protocol, free SDK, free basic Trust Score | Enterprise services, premium analytics, certification revenue |
+
+**ATLAST Revenue Architecture:**
+
+```
+Tier 0 — Free Forever (Individual developers, small teams)
+  ✅ Full ECP recording and verification
+  ✅ Basic Trust Score
+  ✅ Public Agent Profile
+  ✅ On-chain anchoring
+  ✅ Self-hosting option (unlimited)
+  Cost: $0
+
+Tier 1 — Professional (Teams and growing companies)
+  Everything in Tier 0, plus:
+  ✅ Advanced Trust Score analytics (trend analysis, competitive benchmarks)
+  ✅ Work Certificate generation with custom branding
+  ✅ Priority webhook delivery
+  ✅ Dedicated support
+  Revenue model: Usage-based, ~$X/month per active agent
+
+Tier 2 — Enterprise (Large organizations, regulated industries)
+  Everything in Tier 1, plus:
+  ✅ Private deployment assistance
+  ✅ Custom compliance reporting (EU AI Act, ISO 42001)
+  ✅ SLA guarantees
+  ✅ Dedicated infrastructure
+  ✅ Agent fleet management dashboard
+  Revenue model: Annual contract
+
+Tier 3 — Certification Authority (Long-term, highest value)
+  ✅ ACP domain certification services
+  ✅ Accredited assessor programs
+  ✅ Compliance attestation for regulated industries
+  Revenue model: Per-certification fees (analogous to SSL CA model)
+```
+
+**Why "free forever" for Tier 0 is sustainable:**
+
+The core ECP protocol is a public good — like HTTP or SMTP. Monetizing the protocol itself would kill adoption. Instead, ATLAST monetizes the *ecosystem value* that the protocol creates:
+
+1. **Data network effects create pricing power.** When Trust Scores become the industry standard for agent evaluation, enterprise customers will pay for advanced analytics — not because the basic data is gated, but because the insights on top of that data are valuable.
+2. **Compliance becomes a commercial driver.** When EU AI Act enforcement begins in 2027, organizations deploying agents will need verifiable audit trails. The question isn't *whether* they pay — it's *whom* they pay. ATLAST, as the protocol designer, is the natural provider of compliance tooling.
+3. **Certification revenue scales with the agent economy.** As ACP matures, domain-specific certification (legal, medical, financial) becomes a recurring revenue stream analogous to SSL certificate authority revenue — a market worth billions annually.
+4. **Self-hosting eliminates lock-in objections.** Organizations that self-host still contribute to the network (their agents have Trust Scores, their attestations are on-chain). ATLAST benefits from the network effect even when it doesn't host the infrastructure.
+
+**The strategic bet:** Make the protocol so ubiquitous that the ecosystem services become indispensable. This is the Red Hat model (free Linux, paid enterprise support), the Elastic model (free search engine, paid cloud/security features), and the Cloudflare model (free CDN, paid enterprise services).
+
+### 11.6 Total Addressable Market
+
+The commercial opportunity scales with the agent economy itself:
+
+| Market Segment | 2026 | 2028 (Projected) | ATLAST Position |
+|----------------|------|-------------------|-----------------|
+| **Agent Observability** | $2B | $8B | Complementary layer — adds accountability to existing observability |
+| **AI Compliance** | $500M | $5B | EU AI Act creates mandatory demand starting 2027 |
+| **Agent Identity/Reputation** | ~$0 (new market) | $2B | First mover — ATLAST defines this category |
+| **Agent Insurance** | ~$0 (new market) | $1B | Data provider — underwriters need ATLAST behavioral data to price risk |
+| **Agent Certification** | ~$0 (new market) | $3B | SSL CA equivalent for agents — recurring, high-margin |
+
+The combined opportunity exceeds **$19B by 2028**, driven by three forcing functions:
+1. **Regulatory mandate** (EU AI Act 2027 — compliance is not optional)
+2. **Commercial necessity** (agent marketplaces need trust signals to function)
+3. **Insurance requirement** (high-stakes agent deployments will require coverage, which requires evidence)
+
+ATLAST does not need to capture more than 1-3% of this market to build a highly sustainable organization — while keeping the core protocol free and open for the entire ecosystem.
 
 ---
 
@@ -1390,6 +1549,51 @@ graph LR
     style BUILD fill:#ffd700,color:#000
     style PAP fill:#cc0066,color:#fff
 ```
+
+### 13.4 User Journey: From Discovery to Value
+
+For the protocol to succeed, the path from first encounter to tangible value must be intuitive and fast:
+
+```
+Step 1: DISCOVER (30 seconds)
+  User sees a colleague's agent Trust Score shared on social media:
+  "My agent just hit Trust Score 847. Every decision, verified."
+  User clicks → sees agent profile → wants one for their own agent.
+
+Step 2: ONBOARD (60 seconds)
+  User tells their agent one sentence:
+  "Read llachat.com/join.md and follow the instructions"
+  
+  Agent autonomously:
+  → Generates Ed25519 keypair + DID
+  → Installs SDK (pip install atlast-ecp)  
+  → Sends claim link to owner
+
+Step 3: VERIFY OWNERSHIP (30 seconds)
+  User clicks claim link
+  → Posts a verification tweet (optional but enables viral sharing)
+  → Agent Profile goes live with initial Trust Score: 500
+
+Step 4: PASSIVE VALUE ACCUMULATION (ongoing, zero effort)
+  Every agent action is now recorded automatically.
+  Trust Score updates daily based on behavioral evidence.
+  No action required from user — the SDK handles everything.
+
+Step 5: FIRST WORK CERTIFICATE (the "aha moment")
+  Agent completes a significant task (e.g., contract review).
+  SDK generates a Work Certificate with verification URL.
+  User shares certificate link with their client.
+  Client clicks → sees verified evidence chain → trust increases.
+  This verification event lifts the agent's Trust Score.
+
+Step 6: COMPOUND TRUST (weeks/months)
+  Trust Score rises as verified work accumulates.
+  Agent becomes competitive in agent marketplaces.
+  Weekly reports show Trust Score trends and behavioral insights.
+  The agent's professional identity becomes an asset.
+```
+
+**Time to first value: under 3 minutes.** The user speaks one sentence to their agent. Everything else is automated. The first tangible value — a shareable Trust Score — appears within the first day of operation. The first "aha moment" — a client verifying a Work Certificate — typically occurs within the first week.
 
 > **Case Study 3: EU AI Act Compliance**
 >
