@@ -1,6 +1,6 @@
 # ATLAST Protocol: Trust Infrastructure for the Agent Economy
 
-**Version 2.1**
+**Version 2.2**
 **Date:** March 2026
 **Authors:** William Au, ATLAST Protocol Working Group
 **Contact:** team@weba0.com
@@ -18,6 +18,7 @@
 > | 1.0 | 2026-03-22 | Initial draft — 10 chapters |
 > | 2.0 | 2026-03-22 | Major expansion — 14 chapters, appendices, economic model |
 > | 2.1 | 2026-03-22 | Diagrams, mathematical formalization, case studies, glossary |
+> | 2.2 | 2026-03-22 | Business model, work certificates, user journey, logic hole fixes |
 
 ---
 
@@ -29,7 +30,7 @@ Current agent logging systems produce *records*, not *evidence*. A record is a c
 
 ATLAST (Agent-Layer Accountability Standards & Transactions) Protocol closes this gap through the **Evidence Chain Protocol (ECP)**, a lightweight, privacy-first open standard for recording and verifying AI agent operations. ECP implements a **Commit-Reveal** architecture: agent action content is hashed and signed locally, only cryptographic fingerprints are transmitted, and Merkle roots are anchored to public blockchains via Ethereum Attestation Service (EAS) on Base. The full content never leaves the user's device — by cryptographic design, not corporate policy.
 
-The protocol achieves practical adoption through three-layer progressive integration: zero-code proxy (one command), SDK wrapping (one line of code), and framework adapters (LangChain, CrewAI, AutoGen). Measured overhead is **0.78ms per LLM call (0.55%)**. Recording failures never affect agent operations (fail-open design). Users pay **$0 at every tier**.
+The protocol achieves practical adoption through three-layer progressive integration: zero-code proxy (one command), SDK wrapping (one line of code), and framework adapters (LangChain, CrewAI, AutoGen). Measured overhead is **0.78ms per LLM call (0.55%)**. Recording failures never affect agent operations (fail-open design). The core protocol — ECP recording, verification, Trust Score, and on-chain anchoring — is **free forever** with no usage limits.
 
 ATLAST is fully open-source (MIT license) and designed for IETF/W3C submission. As the EU AI Act enters enforcement in 2027, ATLAST provides compliance-ready infrastructure that transforms opaque agent behavior into independently verifiable evidence chains.
 
@@ -215,7 +216,7 @@ The analogy: a security camera records what happens in a building. But a securit
 | **Privacy Architecture** | Commit-Reveal: content encrypted locally, only hashes transmitted | Content stored on vendor platform | Content on your server (unencrypted) | Content on vendor platform | Varies |
 | **Vendor Lock-in** | Zero (open standard, MIT license, self-deploy) | High (proprietary format) | Medium (open-source but custom format) | Very high | N/A |
 | **EU AI Act Compliance** | Native design target | Retrofit feature | Not addressed | Partial coverage | Not addressed |
-| **User Cost** | $0 (free, forever) | $39-499/month | Self-hosting costs | Enterprise pricing | Engineering time |
+| **User Cost** | $0 core protocol (free forever; optional premium analytics) | $39-499/month | Self-hosting costs | Enterprise pricing | Engineering time |
 | **Cross-Platform Identity** | Agent DID travels across platforms | Tied to LangChain ecosystem | Tied to deployment | Tied to Datadog | None |
 
 ### 3.3 Complementary, Not Competitive
@@ -352,6 +353,10 @@ ATLAST **cannot** read agent conversations — not because of a privacy policy t
 Evidence recording must never degrade agent performance or reliability. If the ATLAST SDK encounters an error, the network is down, or the server is unreachable, the agent continues operating normally. Every recording operation is wrapped in exception handling with background asynchronous processing. Measured overhead: 0.78ms per LLM call (0.55% of typical latency).
 
 The recording layer is invisible to both the agent and the user under all conditions — normal operation, degraded network, and complete infrastructure failure.
+
+**Offline and edge-case behavior:** When the network is unavailable, the SDK continues recording ECP records locally in `.ecp/`. Records are queued and batch-uploaded when connectivity resumes. No data is lost. The local evidence chain remains complete and verifiable even if the server is never contacted — the chain hashes and signatures are computed locally and are self-verifying.
+
+**Data retention:** Server-side hashes are retained indefinitely by default — evidence must be available for the lifetime of the agent's operational history. On-chain Merkle roots are permanent by the nature of blockchain immutability. Local `.ecp/` records are under the user's control and can be retained or deleted at their discretion (see GDPR Right to Erasure in §10.3). Organizations can configure custom retention policies for their self-hosted deployments.
 
 **Principle 3: Open Standard, Not Open Product**
 
@@ -1118,6 +1123,8 @@ Work Certificates transform agent output from *claims* into *evidence*. In a wor
 | **Self-reported gaming** | Agent inflates its own metrics | No self-report fields in ECP spec; all behavioral signals are SDK-detected | None — architectural elimination |
 | **Denial of service** | Overwhelm ATLAST API | Rate limiting (60 req/min per IP); Prometheus monitoring; auto-scaling | Sustained DDoS from distributed sources |
 | **Webhook forgery** | Fake attestation notifications | HMAC-SHA256 signing on raw HTTP body bytes; constant-time comparison (`secrets.compare_digest`) | None if HMAC key is secure |
+| **Collusion** | Multiple agents or owners coordinate to inflate Trust Scores through mutual positive verification | Cross-verification anomaly detection (statistical clustering of verification sources); verification weight decays for repeated source-target pairs; Sybil resistance via ownership verification | Sophisticated collusion with many independent verified identities |
+| **Hash collision** | Two different contents produce the same SHA-256 hash | SHA-256 has 2¹²⁸ collision resistance — no collision has ever been found. Finding one would break TLS, Bitcoin, and all digital signatures simultaneously. | Effectively zero (requires breaking a federal cryptographic standard) |
 
 ### 8.2 Cryptographic Primitives
 
@@ -1196,7 +1203,7 @@ Benchmark conditions: 100 iterations, real OpenAI API calls (`gpt-4o-mini`), Pyt
 
 The per-agent cost decreases with scale due to super-batch aggregation: blockchain costs are effectively fixed regardless of agent count. Compute and storage scale linearly but benefit from commodity pricing.
 
-**Users pay $0 at every scale.** Self-deployment (fully open-source) allows organizations to run their own infrastructure at raw cloud costs — typically $50-200/month for a production-grade deployment serving thousands of agents.
+**Core protocol costs are $0 at every scale.** ECP recording, verification, basic Trust Score, and on-chain anchoring are free without usage limits. Optional premium services (advanced analytics, compliance reporting, enterprise support) are available for organizations that need them (see §11.5). Self-deployment (fully open-source) allows organizations to run their own infrastructure at raw cloud costs — typically $50-200/month for a production-grade deployment serving thousands of agents.
 
 ---
 
@@ -1350,7 +1357,7 @@ Tier 1 — Professional (Teams and growing companies)
   ✅ Work Certificate generation with custom branding
   ✅ Priority webhook delivery
   ✅ Dedicated support
-  Revenue model: Usage-based, ~$X/month per active agent
+  Revenue model: Usage-based (pricing TBD based on market validation)
 
 Tier 2 — Enterprise (Large organizations, regulated industries)
   Everything in Tier 1, plus:
@@ -1624,7 +1631,7 @@ ATLAST Protocol addresses this gap with engineering infrastructure, not policy p
 - **Passive behavioral detection** eliminates self-reporting gaming
 - **Three-layer integration** ensures adoption friction below 3 minutes
 - **0.78ms overhead** makes compliance invisible to users
-- **$0 user cost** removes all adoption barriers
+- **$0 core protocol** removes all adoption barriers (premium services optional)
 - **Open-source, open-standard** design prevents vendor lock-in and ensures permanence
 
 The protocol is live. The SDK is published. 536 tests are passing. The standard is open.
