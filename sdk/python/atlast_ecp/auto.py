@@ -17,6 +17,14 @@ How it works:
 Fail-Open: if any step fails, LLM calls are unaffected.
 """
 
+import warnings
+warnings.warn(
+    'atlast_ecp.auto is experimental and may change in future versions.',
+    stacklevel=2,
+    category=FutureWarning,
+)
+
+
 import threading
 from typing import Optional
 

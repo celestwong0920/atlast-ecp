@@ -10,6 +10,14 @@ Usage:
     python -m atlast_ecp.openclaw_scanner ~/.openclaw-david-bazi --agent-name "david-bazi" --watch
 """
 
+import warnings
+warnings.warn(
+    'atlast_ecp.openclaw_scanner is experimental and may change in future versions.',
+    stacklevel=2,
+    category=FutureWarning,
+)
+
+
 import json
 import os
 import sys

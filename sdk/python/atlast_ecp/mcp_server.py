@@ -12,6 +12,14 @@ Usage (Claude Desktop / Claude Code / any MCP-compatible platform):
     Configured via MCP settings or: npx atlast-ecp install
 """
 
+import warnings
+warnings.warn(
+    'atlast_ecp.mcp_server is experimental and may change in future versions.',
+    stacklevel=2,
+    category=FutureWarning,
+)
+
+
 import json
 import sys
 from typing import Any
