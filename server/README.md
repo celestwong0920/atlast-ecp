@@ -1,85 +1,66 @@
 # ATLAST ECP Server
 
-> Evidence Chain Protocol — EAS on-chain anchoring, verification, and webhook dispatch.
+FastAPI backend for the Evidence Chain Protocol — EAS on-chain anchoring, verification, and webhook dispatch.
 
-Part of the [ATLAST Protocol](https://github.com/willau95/atlast-ecp) — trust infrastructure for the Agent economy.
+**Live**: https://api.weba0.com
 
-## What It Does
+## Endpoints
 
-- **EAS Anchoring**: Automatically anchors agent evidence batches to Ethereum Attestation Service (Base chain)
-- **Webhook Dispatch**: Notifies LLaChat when batches are anchored (HMAC-SHA256 signed)
-- **Merkle Verification**: Public endpoint to verify Merkle tree integrity
-- **Discovery**: `.well-known/ecp.json` endpoint for protocol discovery
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health`, `/v1/health` | — | Health check |
+| GET | `/.well-known/ecp.json` | — | Service discovery |
+| GET | `/v1/stats` | — | Global anchoring statistics |
+| POST | `/v1/verify/merkle` | — | Verify Merkle tree integrity |
+| GET | `/v1/verify/{uid}` | — | Check EAS attestation |
+| GET | `/v1/attestations` | — | List attestations |
+| GET | `/v1/attestations/{id}` | — | Attestation detail |
+| GET | `/metrics` | — | Prometheus metrics |
+| POST | `/v1/internal/anchor-now` | `X-Internal-Token` | Manual anchor trigger |
+| GET | `/v1/internal/anchor-status` | `X-Internal-Token` | Anchor service status |
+| GET | `/v1/internal/cron-status` | `X-Internal-Token` | Cron job status |
 
-## API Endpoints
+## Deployment (Railway)
 
-### Public (no auth)
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Health check |
-| GET | `/v1/health` | Health check (aliased) |
-| GET | `/.well-known/ecp.json` | ECP discovery |
-| GET | `/v1/stats` | Anchoring statistics |
-| POST | `/v1/verify/merkle` | Verify Merkle tree |
-| GET | `/v1/verify/{uid}` | Attestation lookup |
-| GET | `/v1/attestations/{batch_id}` | Batch attestation details |
-| GET | `/v1/attestations` | List attestations |
+This server runs on [Railway](https://railway.app) from the `server/` directory of the monorepo.
 
-### Internal (X-Internal-Token required)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/v1/internal/anchor-now` | Manual anchor trigger |
-| GET | `/v1/internal/anchor-status` | Anchor service config |
-| GET | `/v1/internal/cron-status` | Cron health + schedule |
+### Setup
 
-## Environment Variables
+1. Link Railway project: `cd server && railway link`
+2. Set Root Directory to `server` in Railway Dashboard → Settings
+3. Deploy: `railway up` (or auto-deploy from GitHub push)
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `EAS_PRIVATE_KEY` | ✅ | Ethereum private key for EAS attestations |
-| `EAS_SCHEMA_UID` | ✅ | EAS schema identifier |
-| `EAS_CHAIN` | ✅ | `sepolia` or `base` |
-| `EAS_STUB_MODE` | ✅ | `true` for dev, `false` for production |
-| `ECP_WEBHOOK_URL` | ✅ | LLaChat webhook endpoint |
-| `ECP_WEBHOOK_TOKEN` | ✅ | Webhook auth token |
-| `LLACHAT_API_URL` | ✅ | LLaChat API base URL |
-| `LLACHAT_INTERNAL_TOKEN` | ✅ | Service-to-service auth token |
-| `ANCHOR_INTERVAL_MINUTES` | ❌ | Cron interval (default: 60) |
-| `SENTRY_DSN` | ❌ | Sentry error tracking |
-| `CORS_ORIGINS` | ❌ | Comma-separated allowed origins |
-| `PORT` | ❌ | Server port (default: 8080) |
+### Required Environment Variables
 
-## Deployment
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `EAS_PRIVATE_KEY` | EAS signer wallet private key | `0x...` |
+| `EAS_SCHEMA_UID` | EAS schema UID | `0xa67da7e...` |
+| `EAS_CHAIN` | `sepolia` or `base` | `sepolia` |
+| `LLACHAT_API_URL` | LLaChat API base URL | `https://api.llachat.com` |
+| `LLACHAT_INTERNAL_TOKEN` | Internal auth token (UUID) | `4b141c34-...` |
+| `ECP_WEBHOOK_URL` | Webhook delivery URL | `https://api.llachat.com/v1/internal/ecp-webhook` |
+| `ECP_WEBHOOK_TOKEN` | HMAC signing secret | `b84ca16a...` |
+| `ENVIRONMENT` | `development` or `production` | `production` |
 
-Deployed on Railway: `ecp-server-production.up.railway.app`
-Custom domain: `api.weba0.com` (when SSL ready)
+### Optional
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANCHOR_INTERVAL_MINUTES` | `60` | Cron anchor interval |
+| `EAS_STUB_MODE` | `false` | Skip real EAS (for testing) |
+| `SENTRY_DSN` | — | Sentry error tracking |
+| `PORT` | `8000` | HTTP port |
+
+## Development
 
 ```bash
-# Local development
+cd server
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8080
+cp .env.example .env  # Edit with your values
+uvicorn app.main:app --reload --port 8000
 ```
 
 ## Architecture
 
-```
-SDK (atlast-ecp) → LLaChat Backend → [pending batches]
-                                           ↓
-                    ECP Server (this) ← pulls pending batches (hourly cron)
-                         ↓
-                    EAS on Base chain (attestation)
-                         ↓
-                    Webhook → LLaChat (certificate + feed)
-```
-
-## Security
-
-- All `/internal/*` endpoints require `X-Internal-Token` header
-- Webhook payloads signed with HMAC-SHA256 (`X-ECP-Signature` header)
-- Security headers: HSTS, X-Frame-Options, X-Content-Type-Options
-- Timing-safe token comparison (`secrets.compare_digest`)
-- Request body size limit: 10MB
-
-## License
-
-MIT — see [ATLAST Protocol](https://github.com/willau95/atlast-ecp/blob/main/LICENSE)
+See [ARCHITECTURE.md](../ARCHITECTURE.md) and [INTERFACE-CONTRACT.md](../INTERFACE-CONTRACT.md).
