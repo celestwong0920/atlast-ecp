@@ -106,7 +106,22 @@ async def lifespan(app: FastAPI):
     )
     scheduler.start()
     logger.info("cron_started", interval_minutes=interval)
+
+    # Init database (if configured)
+    try:
+        from .db.database import init_db
+        await init_db()
+    except Exception as e:
+        logger.warning("db_init_failed", error=str(e))
+
     yield
+
+    # Cleanup
+    try:
+        from .db.database import close_db
+        await close_db()
+    except Exception:
+        pass
     scheduler.shutdown(wait=False)
     logger.info("ecp_server_stopped")
 

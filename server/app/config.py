@@ -17,6 +17,9 @@ class Settings:
     LLACHAT_API_URL: str = os.getenv("LLACHAT_API_URL", "https://api.llachat.com")
     LLACHAT_INTERNAL_TOKEN: str = os.getenv("LLACHAT_INTERNAL_TOKEN", "")
 
+    # Database
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+
     # Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
 

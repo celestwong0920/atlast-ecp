@@ -1,0 +1,104 @@
+"""
+PostgreSQL Database Connection + SQLAlchemy Models.
+
+ECP Server stores attestation records in Postgres for:
+- Historical attestation lookup (vs LLaChat API polling)
+- Independent audit trail (decoupled from LLaChat)
+- Analytics and metrics
+"""
+
+import structlog
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, Index
+from datetime import datetime, timezone
+
+from ..config import settings
+
+logger = structlog.get_logger()
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Attestation(Base):
+    """On-chain attestation record."""
+    __tablename__ = "attestations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    batch_id = Column(String(64), unique=True, nullable=False, index=True)
+    agent_did = Column(String(128), nullable=False, index=True)
+    merkle_root = Column(String(128), nullable=False)
+    record_count = Column(Integer, nullable=False, default=0)
+    attestation_uid = Column(String(128), unique=True, nullable=True, index=True)
+    eas_tx_hash = Column(String(128), nullable=True)
+    schema_uid = Column(String(128), nullable=True)
+    chain_id = Column(Integer, nullable=True)
+    on_chain = Column(Boolean, default=False)
+    webhook_sent = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    anchored_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_attestations_agent_created", "agent_did", "created_at"),
+    )
+
+
+class AnchorLog(Base):
+    """Cron anchor run log."""
+    __tablename__ = "anchor_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    processed = Column(Integer, default=0)
+    anchored = Column(Integer, default=0)
+    errors = Column(Integer, default=0)
+    duration_ms = Column(Integer, default=0)
+    error_detail = Column(Text, nullable=True)
+
+
+# ── Engine + Session ────────────────────────────────────────────────────────
+
+_engine = None
+_session_factory = None
+
+
+def _get_async_url(url: str) -> str:
+    """Convert sync postgres URL to async (asyncpg)."""
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+async def init_db():
+    """Initialize database: create engine + tables."""
+    global _engine, _session_factory
+
+    if not settings.DATABASE_URL:
+        logger.info("db_skipped", reason="DATABASE_URL not configured")
+        return
+
+    async_url = _get_async_url(settings.DATABASE_URL)
+    _engine = create_async_engine(async_url, echo=False, pool_size=5, max_overflow=10)
+    _session_factory = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with _engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    logger.info("db_initialized", tables=["attestations", "anchor_logs"])
+
+
+async def get_session() -> AsyncSession | None:
+    """Get a database session (or None if DB not configured)."""
+    if _session_factory is None:
+        return None
+    return _session_factory()
+
+
+async def close_db():
+    """Close database connection."""
+    global _engine
+    if _engine:
+        await _engine.dispose()
+        logger.info("db_closed")
