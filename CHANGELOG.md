@@ -1,154 +1,84 @@
 # Changelog
 
-All notable changes to ATLAST ECP are documented in this file.
+All notable changes to the ATLAST ECP SDK and Server.
 
-## [0.7.0] - 2026-03-20
-
-### Added
-- **Insights Layer B** — split into 3 independent sub-functions:
-  - `analyze_performance()`: latency, throughput, success rate, by-model breakdown
-  - `analyze_trends()`: time-series trends bucketed by day/hour
-  - `analyze_tools()`: tool usage distribution and error rates
-  - CLI: `atlast insights --section performance|trends|tools [--bucket hour]`
-  - Server: `GET /v1/insights/performance|trends|tools` endpoints
-- **API Enhancements**:
-  - Paginated batch listing: `GET /v1/agents/{handle}/batches?page=&limit=`
-  - Batch detail with records: `GET /v1/batches/{batch_id}`
-  - A2A handoffs query: `GET /v1/agents/{handle}/handoffs`
-- **Webhook** (`atlast_ecp.webhook`):
-  - `fire_webhook()`: async POST, fail-open, retry 1x on 5xx, timeout 5s
-  - `build_webhook_payload()`: CERTIFICATE-SCHEMA.md Section 3 compliant
-  - Server auto-fires webhook after batch creation
-- **`.well-known/ecp.json` Discovery** (RFC 8615):
-  - Server returns capabilities, endpoints, auth methods
-  - CLI: `atlast discover <url>`
-- **AutoGen Adapter** (`atlast_ecp.adapters.autogen`):
-  - `register_atlast(agent)` one-line integration
-  - Multi-agent handoff detection (source/target tracking)
-  - Zero dependency (runtime import only)
-- **CLI `config` command**: `atlast config get|set <key> <value>`
-- **ECP-SERVER-SPEC.md v1.1**: 6 new sections (Insights, Batch Detail, Pagination, Handoffs, Discovery, Webhook)
-
-### Fixed
-- **Merkle tree sort inconsistency** (BUG-1): Server `merkle.py` was sorting hashes before building tree, but SDK preserves insertion order. Unified to no-sort. Added 3 cross-SDK consistency tests.
-- **DID example format** (BUG-2): ECP-SERVER-SPEC.md examples changed from `z6Mk...` multibase to `{hex}` format matching actual SDK output.
-- **Insights `model=None` key**: `analyze_performance()` now defaults `None` model to `"unknown"`.
-
-## [0.6.1] - 2026-03-18
+## [0.8.0] — Unreleased (Phase 5)
 
 ### Added
-- **LangChain Callback Handler** (`atlast_ecp.adapters.langchain`) — one-line integration
-  - Captures: LLM calls, chat model calls, tool calls, retriever queries, errors
-  - Tracks model name, token counts, latency; supports concurrent runs
-- **CrewAI Callback** (`atlast_ecp.adapters.crewai`) — one-line integration
-  - Captures: task completions, agent steps, tool calls
-  - Supports both `callbacks=[...]` and `step_callback=` modes
-- **TypeScript SDK README** rewritten with complete API reference
-- 21 new adapter tests
-
-## [0.6.0] - 2026-03-18
-
-### Added
-- **ECP v1.0 Progressive Specification** — 5-level layered format (Core → Metadata → Chain → Identity → Anchor)
-- **Minimal Records** — `create_minimal_record()` with just 6 required fields (`ecp`, `id`, `ts`, `agent`, `action`, `in_hash`, `out_hash`)
-- **`record_minimal()` / `record_minimal_async()`** — fire-and-forget recording, no DID or chain required
-- **ATLAST Transparent Proxy** (`atlast_ecp.proxy`) — zero-code ECP recording via HTTP reverse proxy
-  - Supports OpenAI, Anthropic, Gemini, Qwen, Kimi, DeepSeek, MiniMax, Yi, and all OpenAI-compatible providers
-  - SSE streaming pass-through with response reconstruction
-  - Fail-open: proxy errors never block the upstream response
-  - `pip install atlast-ecp[proxy]` (aiohttp dependency)
-- **CLI Expansion** — 6 new commands:
-  - `atlast init` — initialize ECP directory (DID by default, `--minimal` to skip)
-  - `atlast record` — create ECP record from stdin or flags
-  - `atlast log` — view local ECP records
-  - `atlast push` — upload records to an ECP server (opt-in)
-  - `atlast proxy` — start transparent recording proxy
-  - `atlast run <cmd>` — wrap any command with automatic ECP proxy (`OPENAI_BASE_URL` override)
-- **Dual format support** — readers accept both v0.1 (nested `step`) and v1.0 (flat) record formats
-- 43 new tests (16 minimal + 27 proxy)
+- Framework adapter examples (`examples/langchain_demo.py`, `crewai_demo.py`, `autogen_demo.py`)
+- Adapter integration README (`sdk/python/atlast_ecp/adapters/README.md`)
+- 21 edge-case adapter tests (total: 50 adapter tests)
+- 34 proxy unit tests (`tests/test_proxy.py`)
 
 ### Changed
-- **README.md** — complete rewrite: "5 minutes to first record", three paths (proxy/CLI/SDK)
-- **ECP-SPEC.md** — rewritten as v1.0 progressive specification (3 pages)
-- Version bumped to 0.6.0
+- Monorepo restructure: `atlast-ecp-server` merged into `server/`, SDKs reorganized to `sdk/{python,typescript,go}/`
 
-## [0.5.1] - 2026-03-17
+## [0.7.0] — 2026-03-20
 
 ### Added
-- **MCP Server** enhanced — 8 tools total (`ecp_record`, `ecp_flush`, `ecp_stats` added; fixed certify route)
-- **OpenClaw Plugin** — real-time ECP recording via message hooks + batch uploader + `ecp_status` tool
-- **GitHub Actions CI** — Python 3.10–3.13 + TypeScript Node 18/20/22
-- **PyPI trusted publishing** workflow
+- **Insights Layer B**: Performance analytics, trend detection, tool usage analysis (`insights.py`)
+- **AutoGen adapter**: `register_atlast()` one-liner, handoff detection (`adapters/autogen.py`)
+- **Webhook module**: HMAC-SHA256 signed webhook delivery (`webhook.py`)
+- **Discovery module**: `.well-known/ecp.json` service discovery
+- **A2A handoff records**: Cross-agent message tracking with `batch_id` drill-down
+- `in_hash`/`out_hash` fields in batch upload payload
+- Certificate schema documentation (`CERTIFICATE-SCHEMA.md`)
 
 ### Fixed
-- `canonicalJSON()` recursive sort for cross-SDK hash consistency (critical for Plugin ↔ Python SDK interop)
-- 6 additional issues from global audit
+- Insights `_get_meta()` extracts latency from v0.1 execution array
+- `urllib` imports moved to module level for CI mock patching
+- `ATLAST_API_URL` set in test conftest for CI
+- 9 production bugs found via real-world scenario testing
+- Safe identity migration preserving DID for registered agents
 
-## [0.5.0] - 2026-03-17
+## [0.6.0] — 2026-03-18
 
 ### Added
-- **OpenClaw Session Scanner** (`atlast_ecp.openclaw_scanner`) — scan any OpenClaw agent's session logs into ECP records
-  - `python -m atlast_ecp.openclaw_scanner ~/.openclaw-my-agent --batch`
-  - `--watch` mode for continuous monitoring
-  - Incremental scanning (no duplicates)
-- **Per-agent DID** — each OpenClaw agent gets its own identity (`~/.ecp/agents/<name>/`)
-- **`ATLAST_ECP_DIR` env var** — override ECP storage directory
-- **EAS on-chain attestations** — live on Base Sepolia via web3.py
-- **Backend rate limiting** — 30/min batch, 10/min register, 20/min certificate
+- **ECP-SPEC v1.0**: Progressive 5-level record specification
+- **ATLAST Proxy** (`proxy.py`): Transparent HTTP reverse proxy for zero-code ECP recording
+- **`create_minimal_record()`**: Lightweight v1.0 6-field records
+- **CLI expansion**: `atlast init`, `atlast record`, `atlast log`, `atlast push`, `atlast proxy`, `atlast run`
+- 243 tests passing
+
+### Changed
+- Architecture shift: ECP is now **protocol+CLI first, SDK second**
+- Local-first default, publishing opt-in
+
+## [0.5.1] — 2026-03-17
+
+### Added
+- **Verification module** (`verify.py`): `verify_signature()`, `build_merkle_proof()`, `verify_merkle_proof()`, `verify_record()`
+- GitHub Actions CI (`ci.yml`) — Python multi-version + TypeScript
+- PyPI trusted publishing workflow
 
 ### Fixed
-- EAS Schema registration ABI encoding (switched to web3.py)
-- Certificate `cert_id` column length (20→30)
-- `ECP_DIR` now defaults to `~/.ecp` (home dir) instead of relative `.ecp/`
+- Critical: `compute_chain_hash` must zero `sig` field before hashing
+- CLI verify always checks chain hash
+- Chain integrity uses graph traversal
 
-## [0.4.0] - 2026-03-16
-
-### Added
-- **Work Certificates**: `atlast certify <title>` CLI command for issuing verifiable work certificates
-- **MCP Tools**: 5 MCP tools — `ecp_stats`, `ecp_verify`, `ecp_records`, `ecp_identity`, `ecp_certify`
-- **EAS Preparation**: Live mode ready for Base mainnet (stub mode for dev/testing)
-
-## [0.3.0] - 2026-03-16
+## [0.5.0] — 2026-03-16
 
 ### Added
-- **OpenTelemetry Auto-Instrumentation**: `from atlast_ecp import init` — 1-line setup
-- **ECPSpanExporter**: Converts OTel spans from 11 LLM libraries into ECP records
-- **Supported Libraries**: openai, anthropic, google-genai, cohere, mistralai, ollama, transformers, langchain, crewai, llama-index, bedrock
-- **Optional dependency**: `pip install atlast-ecp[otel]`
-- 14 new OTel tests
+- **Core SDK**: `record()`, `wrap(client)`, identity/DID, storage, batch/Merkle, signals
+- **Adapters**: LangChain callback handler, CrewAI callback
+- **CLI**: `atlast register`, `atlast verify`, `atlast flush`
+- **MCP Server**: Query ECP records via Model Context Protocol
+- **OpenClaw scanner**: Scan OpenClaw session logs for ECP records
+- 181 tests passing, published on PyPI
 
-## [0.2.1] - 2026-03-16
+## [0.2.0] — 2026-03-16
+
+### Added
+- Gemini + LiteLLM `wrap()` support
+- `atlast register` CLI command
 
 ### Fixed
-- **Critical**: `compute_chain_hash()` now zeros both `chain.hash` AND `sig` before hashing (was only zeroing `chain.hash`, causing round-trip verification failure)
-- CLI `verify` always checks chain hash (was skipping genesis records)
-- `_check_chain_integrity()` uses graph traversal instead of timestamp sorting (fixes same-millisecond edge case)
-- CLI `register` uses correct field names (`did`/`public_key`) matching backend schema
+- Align CLI register payload with backend schema (did, public_key)
 
-## [0.2.0] - 2026-03-16
+## [0.1.0] — 2026-03-15
 
 ### Added
-- **Google Gemini** wrapper: `wrap(genai.Client())`
-- **LiteLLM** wrapper: `wrap(litellm)` — 100+ LLM providers
-- `atlast register` CLI command for agent self-registration
-- GitHub Actions CI (push/PR, Python 3.10-3.13 matrix)
-- PyPI trusted publisher workflow
-
-## [0.1.0] - 2026-03-16
-
-### Added
-- Core ECP recording engine (`core.record()`)
-- Tamper-proof hash chain with `sha256:` prefixed hashes
-- ed25519 cryptographic signing (`[crypto]` extra)
-- `wrap()` for Anthropic and OpenAI clients
-- Passive behavioral signal detection (6 flags: retried, hedged, incomplete, high_latency, error, human_review)
-- Local storage in `.ecp/` directory
-- Merkle tree batching with automatic upload
-- Agent identity (DID) generation and persistence
-- CLI tools: `init`, `view`, `verify`, `stats`, `did`, `flush`, `export`
-- MCP server for Claude Desktop / Claude Code
-- OpenClaw plugin integration
-- Claude Code hooks (PreToolUse/PostToolUse)
-- Zero required dependencies
-- Fail-open design: recording failures never affect agent operation
-- MIT license
+- Initial ECP SDK: Library Mode + Claude Code Plugin + OpenClaw Plugin
+- ECP-SPEC v0.1
+- FastAPI reference backend (23 tests)
+- 85 tests passing
