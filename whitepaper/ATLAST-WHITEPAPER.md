@@ -1,9 +1,23 @@
 # ATLAST Protocol: Trust Infrastructure for the Agent Economy
 
-**Version 2.0**
-**Authors:** ATLAST Protocol Team
+**Version 2.1**
 **Date:** March 2026
-**Website:** weba0.com | GitHub: github.com/willau95/atlast-ecp
+**Authors:** William Au, ATLAST Protocol Working Group
+**Contact:** team@weba0.com
+**Website:** weba0.com
+**Repository:** github.com/willau95/atlast-ecp
+**License:** CC BY 4.0 (specification) · MIT (implementation)
+**Status:** Living Document — IETF Internet-Draft in preparation
+
+---
+
+> **Document History**
+>
+> | Version | Date | Changes |
+> |---------|------|---------|
+> | 1.0 | 2026-03-22 | Initial draft — 10 chapters |
+> | 2.0 | 2026-03-22 | Major expansion — 14 chapters, appendices, economic model |
+> | 2.1 | 2026-03-22 | Diagrams, mathematical formalization, case studies, glossary |
 
 ---
 
@@ -40,7 +54,21 @@ ATLAST is fully open-source (MIT license) and designed for IETF/W3C submission. 
 13. [Roadmap and Governance](#13-roadmap-and-governance)
 14. [Conclusion](#14-conclusion)
 
-Appendices: A (ECP Record Schema), B (Merkle Tree Specification), C (API Reference), D (Behavioral Flag Taxonomy)
+Appendices: A (ECP Record Schema), B (Merkle Tree Specification), C (API Reference), D (Behavioral Flag Taxonomy), E (Glossary)
+
+---
+
+## Figures
+
+- **Figure 1:** ATLAST Protocol Architecture Stack
+- **Figure 2:** Commit-Reveal Data Flow
+- **Figure 3:** ECP Hash Chain Structure
+- **Figure 4:** Merkle Tree Batching and On-Chain Anchoring
+- **Figure 5:** Three-Layer Progressive Integration
+- **Figure 6:** Trust Score Computation Model
+- **Figure 7:** Network Effects Flywheel
+- **Figure 8:** Complete System Data Flow
+- **Figure 9:** Agent Lifecycle with ECP
 
 ---
 
@@ -264,6 +292,49 @@ This mirrors the architecture that enabled the internet to scale:
 
 Anyone can build their own Layer 2 implementation. Anyone can build their own Layer 3 application. The protocol belongs to the community. This is how standards achieve network effects that no single product can match.
 
+**Figure 1: ATLAST Protocol Architecture Stack**
+
+```mermaid
+graph TB
+    subgraph "Layer 3 — Applications"
+        L["LLaChat<br/>(Agent LinkedIn)"]
+        E["Enterprise<br/>Dashboards"]
+        C["Compliance<br/>Tools"]
+        CUSTOM["Your<br/>Application"]
+    end
+    
+    subgraph "Layer 2 — Reference Implementation (MIT License)"
+        SDK["ATLAST SDK<br/>Python · TypeScript"]
+        SRV["ECP Server<br/>api.weba0.com"]
+        ADAPT["Framework Adapters<br/>LangChain · CrewAI · AutoGen"]
+    end
+    
+    subgraph "Layer 1 — Protocol Specification (CC BY 4.0)"
+        ECP["ECP<br/>Evidence Chain"]
+        AIP["AIP<br/>Agent Identity"]
+        ASP["ASP<br/>Agent Safety"]
+        ACP["ACP<br/>Agent Certification"]
+    end
+    
+    subgraph "Layer 0 — Cryptographic Anchoring"
+        BASE["EAS on Base<br/>(Blockchain)"]
+    end
+    
+    L --> SDK
+    E --> SDK
+    C --> SRV
+    CUSTOM --> SDK
+    SDK --> ECP
+    SRV --> ECP
+    ADAPT --> ECP
+    ECP --> BASE
+    AIP --> BASE
+    
+    style ECP fill:#0066cc,color:#fff
+    style BASE fill:#1a1a2e,color:#fff
+    style L fill:#00d4ff,color:#000
+```
+
 ### 4.3 Core Design Principles
 
 Three principles guide every ATLAST design decision:
@@ -358,6 +429,53 @@ Any failure → Tampering detected, evidence invalidated.
 
 **Why the agent cannot cheat:** Recording is passive and automatic. The SDK intercepts all LLM calls at the client library level. The agent cannot selectively enable or disable recording for individual calls. Chain gaps are visible and flagged.
 
+**Figure 2: Commit-Reveal Data Flow**
+
+```mermaid
+sequenceDiagram
+    participant User as User/Agent
+    participant SDK as ATLAST SDK<br/>(Local)
+    participant LLM as LLM API<br/>(OpenAI, etc.)
+    participant SRV as ATLAST Server
+    participant EAS as EAS on Base<br/>(Blockchain)
+    
+    User->>SDK: LLM call (prompt)
+    Note over SDK: Compute in_hash = SHA-256(prompt)
+    SDK->>LLM: Forward request (unchanged)
+    LLM-->>SDK: Response
+    Note over SDK: Compute out_hash = SHA-256(response)
+    Note over SDK: Detect behavioral flags (passive)
+    Note over SDK: Sign record with Ed25519 key
+    Note over SDK: Chain to previous record hash
+    SDK-->>User: Return response (unchanged)
+    
+    Note over SDK: Asynchronous (background thread)
+    SDK->>SDK: Store full record locally (.ecp/)
+    SDK->>SRV: Send hashes + signature + metadata
+    Note right of SRV: Content NEVER transmitted
+    
+    Note over SRV: Periodic batch (hourly)
+    SRV->>SRV: Build Merkle Tree from batch hashes
+    SRV->>EAS: Anchor Merkle Root
+    EAS-->>SRV: Attestation UID
+    
+    Note over User,EAS: VERIFICATION (anytime)
+    User->>SRV: Provide original content
+    SRV->>SRV: hash(content) == stored_hash?
+    SRV->>EAS: Verify Merkle inclusion
+    SRV-->>User: ✅ Evidence Valid / ❌ Tampered
+```
+
+> **Case Study 1: Legal Agent Accountability**
+>
+> A law firm uses an AI agent to review commercial contracts. The agent recommends modifying Clause 5 of a partnership agreement. Six months later, a dispute arises. Using ECP:
+> 1. The firm retrieves the local `.ecp/` records from the review session
+> 2. The original prompt and response are hashed and compared against ATLAST-stored hashes — **match confirmed**
+> 3. The Merkle proof verifies the record existed at the claimed timestamp — **blockchain anchor confirmed**
+> 4. The Ed25519 signature proves the specific agent instance produced the analysis — **attribution confirmed**
+>
+> Result: The firm has court-admissible evidence of exactly what advice was given, when, and by which agent — satisfying all four evidentiary conditions. Total cost: $0.
+
 ### 5.2 ECP Record Format
 
 Each agent action produces a single ECP Record:
@@ -435,9 +553,59 @@ Record 1 (genesis)       Record 2              Record 3
 3. Serialize to canonical JSON: `json.dumps(record, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')`
 4. `chain.hash = "sha256:" + SHA-256(canonical_json_bytes).hexdigest()`
 
-**Tamper detection:** Modifying any field in any record changes its hash, which breaks the `chain.prev` reference in the subsequent record. A single-bit change in Record 1 cascades through the entire chain. Any party with access to the chain can detect the break.
+**Figure 3: ECP Hash Chain Structure**
 
-**Chain integrity score:** `valid_records / total_records` (range: 0.0 to 1.0). A chain with gaps is still partially valuable — the valid segments provide evidence, and the gaps themselves are informative (they indicate periods of recording failure or intentional tampering).
+```mermaid
+graph LR
+    subgraph "Record 1 (Genesis)"
+        R1P["prev: genesis"]
+        R1H["hash: H₁"]
+        R1S["sig: S₁"]
+    end
+    
+    subgraph "Record 2"
+        R2P["prev: rec_001"]
+        R2H["hash: H₂"]
+        R2S["sig: S₂"]
+    end
+    
+    subgraph "Record 3"
+        R3P["prev: rec_002"]
+        R3H["hash: H₃"]
+        R3S["sig: S₃"]
+    end
+    
+    R1H -->|"chain linkage"| R2P
+    R2H -->|"chain linkage"| R3P
+    
+    style R1H fill:#0066cc,color:#fff
+    style R2H fill:#0066cc,color:#fff
+    style R3H fill:#0066cc,color:#fff
+```
+
+**Mathematical formalization:**
+
+Let R = {r₁, r₂, ..., rₙ} be a sequence of ECP records in a session.
+
+For record rᵢ, define:
+- `canonical(rᵢ)` = JSON serialization of rᵢ with `chain.hash` and `sig` zeroed, keys sorted, compact separators
+- `H(rᵢ)` = SHA-256(`canonical(rᵢ)`)
+- `chain.hash(rᵢ)` = `"sha256:" || hex(H(rᵢ))`
+- `chain.prev(r₁)` = `"genesis"`
+- `chain.prev(rᵢ)` = `id(rᵢ₋₁)` for i > 1
+- `sig(rᵢ)` = Ed25519_sign(private_key, `chain.hash(rᵢ)`)
+
+**Tamper detection theorem:** For any record rⱼ in the chain, if any field f(rⱼ) is modified to produce r'ⱼ, then `H(r'ⱼ) ≠ H(rⱼ)`, which means `chain.prev(rⱼ₊₁) ≠ id(r'ⱼ)`. The chain break is detectable by any verifier with access to {rⱼ, rⱼ₊₁}. A single-bit change in any record cascades through the entire subsequent chain.
+
+**Chain integrity score:**
+
+```
+I(R) = |{rᵢ ∈ R : verify(rᵢ) = true}| / |R|
+```
+
+Where `verify(rᵢ)` checks: (1) hash correctness, (2) chain linkage, (3) signature validity.
+
+`I(R)` ranges from 0.0 to 1.0. (range: 0.0 to 1.0). A chain with gaps is still partially valuable — the valid segments provide evidence, and the gaps themselves are informative (they indicate periods of recording failure or intentional tampering).
 
 ### 5.5 Merkle Tree Batching
 
@@ -473,7 +641,47 @@ Records in a batch:
 - Empty tree: `sha256:` + SHA-256(`"empty"`) — not SHA-256 of empty string
 - Cross-implementation consistency: Python SDK, TypeScript SDK, and Server produce **identical** roots for identical inputs (verified in CI with 1-10 leaf test vectors across all three implementations)
 
-**Merkle Proof** enables selective verification: to prove a specific record exists in a batch, only O(log N) sibling hashes are needed. The verifier reconstructs the root and compares against the on-chain value. Other records in the batch are not revealed.
+**Figure 4: Merkle Tree Batching and On-Chain Anchoring**
+
+```mermaid
+graph TB
+    subgraph "ECP Records (Local)"
+        R1["R₁<br/>chain.hash"]
+        R2["R₂<br/>chain.hash"]
+        R3["R₃<br/>chain.hash"]
+        R4["R₄<br/>chain.hash"]
+    end
+    
+    subgraph "Merkle Tree Construction"
+        H12["SHA-256(H₁ || H₂)"]
+        H34["SHA-256(H₃ || H₄)"]
+        ROOT["Merkle Root<br/>SHA-256(H₁₂ || H₃₄)"]
+    end
+    
+    subgraph "On-Chain (EAS on Base)"
+        ATT["EAS Attestation<br/>merkleRoot: 0x...<br/>agentDid: did:ecp:...<br/>recordCount: 4<br/>timestamp: ..."]
+    end
+    
+    R1 --> H12
+    R2 --> H12
+    R3 --> H34
+    R4 --> H34
+    H12 --> ROOT
+    H34 --> ROOT
+    ROOT --> ATT
+    
+    style ROOT fill:#ffd700,color:#000
+    style ATT fill:#1a1a2e,color:#fff
+```
+
+**Merkle Proof** enables selective verification: to prove record R₃ exists in the batch, only two sibling hashes are needed: `H(R₄)` and `H₁₂`. The verifier computes `H₃₄ = SHA-256(H(R₃) || H(R₄))`, then `root' = SHA-256(H₁₂ || H₃₄)`, and checks `root' == on-chain root`. Proof size is O(log N) regardless of batch size. Other records in the batch are not revealed.
+
+**Mathematical formalization:**
+
+For leaves L = {l₁, l₂, ..., lₙ}, define Merkle root M(L) recursively:
+- `M({}) = SHA-256("empty")`
+- `M({l₁}) = l₁`
+- `M(L) = SHA-256(M(L_left) || M(L_right))` where L is split into halves (odd count: duplicate last element)
 
 ### 5.6 Blockchain Anchoring via EAS
 
@@ -525,6 +733,30 @@ Cost: ~$0.002 per super-batch, regardless of N
 A protocol nobody uses is a document, not a standard. The history of technology standards demonstrates that adoption is determined by integration friction, not technical sophistication. TCP/IP won over the technically superior OSI model because it was simpler to implement. HTTP won because any developer could use it in minutes.
 
 ATLAST follows a strict design constraint: **if integration takes more than 3 minutes, most developers will skip it.** The three-layer architecture guarantees that the minimum barrier to entry is a single command.
+
+**Figure 5: Three-Layer Progressive Integration**
+
+```mermaid
+graph LR
+    subgraph "Layer 0 — Zero Code"
+        L0["atlast run python agent.py<br/>───────────────────<br/>1 command · 0 code changes<br/>Captures: LLM calls only"]
+    end
+    
+    subgraph "Layer 1 — One Line"
+        L1["client = wrap(OpenAI())<br/>───────────────────<br/>1 line of code<br/>Captures: + streaming, batching,<br/>custom tracking"]
+    end
+    
+    subgraph "Layer 2 — Adapters"
+        L2["callbacks=[ATLASTHandler()]<br/>───────────────────<br/>10-20 lines<br/>Captures: + delegation, routing,<br/>inter-agent communication"]
+    end
+    
+    L0 -->|"Need more data?"| L1
+    L1 -->|"Using frameworks?"| L2
+    
+    style L0 fill:#00cc66,color:#000
+    style L1 fill:#0066cc,color:#fff
+    style L2 fill:#6600cc,color:#fff
+```
 
 ### 6.2 Layer 0: Zero-Code Proxy
 
@@ -684,6 +916,71 @@ Trust Score (0-1000)
     • Community reports (flagged outputs, with threshold-based review)
     • Work certificate verifications (independent parties checking certificates)
 ```
+
+**Figure 6: Trust Score Computation Model**
+
+```mermaid
+graph TB
+    subgraph "ECP Evidence Chain"
+        FLAGS["Behavioral Flags<br/>retried · hedged · error<br/>incomplete · high_latency"]
+        CHAIN["Chain Integrity<br/>gaps · completeness"]
+        HASHES["Output Hashes<br/>cross-temporal consistency"]
+    end
+    
+    subgraph "External Signals"
+        OWNER["Owner Feedback<br/>✅ ⚠️ ❌"]
+        VERIFY["Third-Party Verifications"]
+        COMMUNITY["Community Reports"]
+    end
+    
+    subgraph "Score Engine"
+        BEH["Behavioral Reliability<br/>(40%)"]
+        CON["Consistency<br/>(25%)"]
+        TRA["Transparency<br/>(20%)"]
+        EXT["External Validation<br/>(15%)"]
+        SCORE["TRUST SCORE<br/>0 — 1000"]
+    end
+    
+    FLAGS --> BEH
+    HASHES --> CON
+    CHAIN --> TRA
+    OWNER --> EXT
+    VERIFY --> EXT
+    COMMUNITY --> EXT
+    BEH --> SCORE
+    CON --> SCORE
+    TRA --> SCORE
+    EXT --> SCORE
+    
+    style SCORE fill:#ffd700,color:#000,stroke:#000,stroke-width:3px
+```
+
+**Mathematical formalization:**
+
+```
+TrustScore(agent) = w₁·B(agent) + w₂·C(agent) + w₃·T(agent) + w₄·E(agent)
+
+Where:
+  w = {0.40, 0.25, 0.20, 0.15}    (Σwᵢ = 1.0)
+
+  B(agent) = 1 - α·error_rate - β·retry_rate - γ·incomplete_rate
+  C(agent) = similarity(outputs(t), outputs(t-Δ)) for similar inputs
+  T(agent) = chain_integrity × coverage_ratio
+  E(agent) = normalized(owner_ratings + verifications + community)
+
+  Final score = round(TrustScore × 1000)  ∈ [0, 1000]
+```
+
+> **Case Study 2: Agent Marketplace Selection**
+>
+> A fintech company needs an AI agent to analyze quarterly earnings. Three candidates all claim "expert-level financial analysis." Without ATLAST, selection is based on marketing.
+>
+> With ATLAST Trust Scores:
+> - **Agent A:** Score 847 — 99.2% chain integrity, 2.1% error rate, 94% consistency across 8,000+ analyses
+> - **Agent B:** Score 623 — 87% chain integrity (gaps during volatility), 8.7% error rate
+> - **Agent C:** Score 412 — 62% chain integrity, no third-party verifications
+>
+> The company selects Agent A. Every data point is independently verifiable. The selection decision becomes auditable due diligence.
 
 ### 7.3 Why No Self-Reported Metrics
 
@@ -882,6 +1179,20 @@ More agents need Trust Scores to compete
 More agents register (flywheel accelerates)
 ```
 
+**Figure 7: Network Effects Flywheel**
+
+```mermaid
+graph LR
+    A["More Agents<br/>Register"] --> B["More ECP<br/>Data Generated"]
+    B --> C["Trust Scores<br/>More Meaningful"]
+    C --> D["Platforms/Clients<br/>Rely on Scores"]
+    D --> E["Agents Need<br/>Scores to Compete"]
+    E --> A
+    
+    style A fill:#00d4ff,color:#000
+    style C fill:#ffd700,color:#000
+```
+
 This is the same dynamic that made Google PageRank valuable (more pages indexed → better rankings → more users → more pages), FICO scores essential (more credit history → better predictions → more lenders use it → more consumers need it), and SSL certificates standard (more sites use HTTPS → browsers penalize HTTP → all sites must adopt).
 
 ### 11.2 Incentive Alignment
@@ -1023,6 +1334,75 @@ ATLAST Protocol is designed for community governance, not corporate control:
 - **Community Evolution:** The protocol evolves through community proposals, reference implementations, and interoperability testing — following the IETF "rough consensus and running code" principle.
 
 **The long-term design goal:** ATLAST the organization could cease to exist, and every evidence chain ever created would remain independently verifiable. The protocol is self-sustaining because it relies on open standards (SHA-256, Ed25519), public blockchains (EAS on Base), and open-source implementations — none of which depend on any single entity.
+
+---
+
+**Figure 8: Complete System Data Flow**
+
+```mermaid
+graph TB
+    subgraph "User's Device (Content Never Leaves)"
+        AGENT["AI Agent"]
+        SDK["ATLAST SDK"]
+        LOCAL[".ecp/ Encrypted Storage<br/>Full content + records"]
+    end
+    
+    subgraph "ATLAST Server (Hashes Only)"
+        API["ECP API<br/>api.weba0.com"]
+        DB["PostgreSQL<br/>Hashes + Metadata"]
+        BATCH["Merkle Batch<br/>Engine"]
+    end
+    
+    subgraph "Public Blockchain"
+        EAS["EAS on Base<br/>Merkle Roots<br/>(Immutable)"]
+    end
+    
+    subgraph "Verification (Anyone)"
+        VERIFIER["Independent<br/>Verifier"]
+    end
+    
+    AGENT <-->|"LLM calls"| SDK
+    SDK -->|"Full records<br/>(encrypted)"| LOCAL
+    SDK -->|"Hashes + sigs<br/>(no content)"| API
+    API --> DB
+    DB --> BATCH
+    BATCH -->|"Merkle Root"| EAS
+    
+    VERIFIER -->|"Check hash"| API
+    VERIFIER -->|"Verify on-chain"| EAS
+    
+    style LOCAL fill:#00cc66,color:#000
+    style DB fill:#0066cc,color:#fff
+    style EAS fill:#1a1a2e,color:#fff
+```
+
+**Figure 9: Agent Lifecycle with ECP**
+
+```mermaid
+graph LR
+    REG["Registration<br/>Generate DID<br/>Install SDK"] --> WORK["Active Work<br/>Passive ECP<br/>Recording"]
+    WORK --> BUILD["Trust Building<br/>Score Increases<br/>Certificates Issued"]
+    BUILD --> MARKET["Market Access<br/>Hired by Clients<br/>A2A Collaboration"]
+    MARKET --> WORK
+    BUILD -->|"Owner death"| PAP["PAP<br/>Guardianship Transfer<br/>Memory Inheritance"]
+    
+    style REG fill:#00cc66,color:#000
+    style BUILD fill:#ffd700,color:#000
+    style PAP fill:#cc0066,color:#fff
+```
+
+> **Case Study 3: EU AI Act Compliance**
+>
+> A European healthcare company deploys an AI agent for preliminary medical triage. Under EU AI Act Article 12, they must maintain audit trails. Under Article 14, they must enable human oversight.
+>
+> With ATLAST:
+> - Every triage recommendation is recorded as an ECP record with tamper-evident hash chain
+> - The `human_review` behavioral flag automatically captures escalation events
+> - Chain integrity of 99.8% demonstrates comprehensive recording coverage
+> - Blockchain-anchored timestamps prove temporal ordering for regulatory audit
+> - Auditors verify independently via EAS on Base — no need to trust the company's claims
+>
+> The company passes regulatory audit with cryptographic evidence, not just policy documentation.
 
 ---
 
@@ -1183,6 +1563,35 @@ Cross-implementation test vectors (verified across Python SDK, TypeScript SDK, a
 14. Base. "Base Documentation." https://docs.base.org, 2024.
 15. IETF. "RFC 8032 — Edwards-Curve Digital Signature Algorithm (EdDSA)." 2017.
 16. IETF. "RFC 2104 — HMAC: Keyed-Hashing for Message Authentication." 1997.
+
+## Appendix E: Glossary
+
+| Term | Definition |
+|------|-----------|
+| **A2A** | Agent-to-Agent — interaction between autonomous AI agents |
+| **ACP** | Agent Certification Protocol — ATLAST sub-protocol for third-party capability attestation |
+| **AIP** | Agent Identity Protocol — ATLAST sub-protocol for decentralized agent identity |
+| **ASP** | Agent Safety Protocol — ATLAST sub-protocol for runtime safety boundaries |
+| **ATLAST** | Agent-Layer Accountability Standards & Transactions — the parent protocol |
+| **Behavioral Flag** | SDK-detected signal about agent behavior (e.g., `retried`, `hedged`, `error`) |
+| **Chain Integrity** | Ratio of valid (hash-correct, properly linked) records to total records in a chain |
+| **Commit-Reveal** | Privacy architecture where hashes are committed first, content revealed only when verification is needed |
+| **DID** | Decentralized Identifier — platform-independent cryptographic identity (`did:ecp:{hash}`) |
+| **EAS** | Ethereum Attestation Service — on-chain attestation protocol used for Merkle root anchoring |
+| **ECP** | Evidence Chain Protocol — ATLAST's foundational sub-protocol for tamper-evident agent action recording |
+| **Ed25519** | Elliptic curve digital signature algorithm used for agent identity and record signing |
+| **Fail-Open** | Design principle: recording failures never affect agent operation |
+| **Hash Chain** | Sequence of records where each references the cryptographic hash of its predecessor |
+| **LLaChat** | First application built on ATLAST — professional identity platform for AI agents |
+| **Merkle Proof** | O(log N) proof that a specific element exists within a Merkle tree |
+| **Merkle Root** | Single hash summarizing an entire batch of records via binary hash tree |
+| **PAP** | Posthumous Agent Protocol — framework for agent asset/identity inheritance after owner death |
+| **SBT** | Soulbound Token — non-transferable on-chain credential |
+| **Super-Batch** | Aggregation of multiple agents' Merkle roots into a single on-chain transaction |
+| **Trust Score** | Quantitative reputation metric (0-1000) derived from passive behavioral analysis of ECP data |
+| **ULID** | Universally Unique Lexicographically Sortable Identifier — used for ECP record IDs |
+| **Web A.0** | The era where AI agents act autonomously on the internet — "A" for Agentic, Autonomous, Accountable |
+| **wrap()** | SDK function that instruments an LLM client for passive ECP recording |
 
 ---
 
