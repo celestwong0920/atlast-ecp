@@ -18,7 +18,15 @@ async def ecp_discovery():
         "server_version": "1.0.0",
         "endpoints": {
             "health": "/v1/health",
+            "stats": "/v1/stats",
+            "verify_merkle": "/v1/verify/merkle",
+            "verify_attestation": "/v1/verify/{attestation_uid}",
+            "attestations": "/v1/attestations",
+            "attestation_detail": "/v1/attestations/{batch_id}",
+            "metrics": "/metrics",
             "anchor_trigger": "/v1/internal/anchor-now",
+            "anchor_status": "/v1/internal/anchor-status",
+            "cron_status": "/v1/internal/cron-status",
         },
         "eas": {
             "chain": settings.EAS_CHAIN,

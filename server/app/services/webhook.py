@@ -78,6 +78,8 @@ async def fire_attestation_webhook(
                 logger.info("ecp_webhook_sent", batch_id=batch_id, status=resp.status_code, attempt=attempt + 1)
                 from ..routes.verify import record_webhook_sent
                 record_webhook_sent()
+                from ..routes.metrics import webhook_total
+                webhook_total.labels(status="success").inc()
                 return True
         except Exception as e:
             logger.warning(
@@ -93,4 +95,6 @@ async def fire_attestation_webhook(
                 await asyncio.sleep(wait)
 
     logger.error("ecp_webhook_exhausted", batch_id=batch_id, attempts=max_retries)
+    from ..routes.metrics import webhook_total
+    webhook_total.labels(status="failed").inc()
     return False

@@ -76,5 +76,5 @@ async def list_attestations(
         "total": 0,
         "limit": limit,
         "offset": offset,
-        "note": "Full attestation listing available in Phase 5 (Atlas DB migration)",
+        "note": "Full attestation listing coming soon (database migration in progress)",
     }

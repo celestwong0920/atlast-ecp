@@ -30,7 +30,7 @@ failed = 0
 skipped = 0
 
 
-def test(name):
+def e2e_test(name):
     def decorator(func):
         def wrapper():
             global passed, failed, skipped
@@ -53,7 +53,7 @@ def test(name):
 
 # ── F1: ECP Server Health ───────────────────────────────────────────────────
 
-@test("F1.1 ECP Server health")
+@e2e_test("F1.1 ECP Server health")
 def test_ecp_health():
     r = httpx.get(f"{ECP_SERVER}/health", timeout=10)
     assert r.status_code == 200
@@ -62,7 +62,7 @@ def test_ecp_health():
     assert data["service"] == "ecp-server"
     return data
 
-@test("F1.2 ECP Server discovery")
+@e2e_test("F1.2 ECP Server discovery")
 def test_discovery():
     r = httpx.get(f"{ECP_SERVER}/.well-known/ecp.json", timeout=10)
     assert r.status_code == 200
@@ -71,13 +71,13 @@ def test_discovery():
     assert "eas_anchoring" in data["capabilities"]
     return data
 
-@test("F1.3 ECP Server stats")
+@e2e_test("F1.3 ECP Server stats")
 def test_stats():
     r = httpx.get(f"{ECP_SERVER}/v1/stats", timeout=10)
     assert r.status_code == 200
     return r.json()
 
-@test("F1.4 Security headers present")
+@e2e_test("F1.4 Security headers present")
 def test_security_headers():
     r = httpx.get(f"{ECP_SERVER}/health", timeout=10)
     assert "x-content-type-options" in r.headers
@@ -89,7 +89,7 @@ def test_security_headers():
 
 # ── F2: LLaChat Integration ────────────────────────────────────────────────
 
-@test("F2.1 LLaChat health")
+@e2e_test("F2.1 LLaChat health")
 def test_llachat_health():
     r = httpx.get(f"{LLACHAT_API}/v1/health", timeout=10)
     assert r.status_code == 200
@@ -97,7 +97,7 @@ def test_llachat_health():
     assert data["status"] == "ok"
     return data
 
-@test("F2.2 Pending batches endpoint (via internal token)")
+@e2e_test("F2.2 Pending batches endpoint (via internal token)")
 def test_pending_batches():
     r = httpx.get(
         f"{LLACHAT_API}/v1/internal/pending-batches",
@@ -109,7 +109,7 @@ def test_pending_batches():
     assert "batches" in data
     return data
 
-@test("F2.3 Pending batches rejects bad token")
+@e2e_test("F2.3 Pending batches rejects bad token")
 def test_pending_batches_bad_token():
     r = httpx.get(
         f"{LLACHAT_API}/v1/internal/pending-batches",
@@ -119,7 +119,7 @@ def test_pending_batches_bad_token():
     assert r.status_code == 401
     return True
 
-@test("F2.4 Batch-anchored rejects nonexistent batch")
+@e2e_test("F2.4 Batch-anchored rejects nonexistent batch")
 def test_batch_anchored_404():
     r = httpx.post(
         f"{LLACHAT_API}/v1/internal/batch-anchored",
@@ -133,7 +133,7 @@ def test_batch_anchored_404():
 
 # ── F3: Anchor Flow ────────────────────────────────────────────────────────
 
-@test("F3.1 Anchor-now endpoint (requires internal token)")
+@e2e_test("F3.1 Anchor-now endpoint (requires internal token)")
 def test_anchor_now():
     r = httpx.post(
         f"{ECP_SERVER}/v1/internal/anchor-now",
@@ -146,13 +146,13 @@ def test_anchor_now():
     assert "processed" in data
     return data
 
-@test("F3.2 Anchor-now rejects no token")
+@e2e_test("F3.2 Anchor-now rejects no token")
 def test_anchor_now_no_token():
     r = httpx.post(f"{ECP_SERVER}/v1/internal/anchor-now", timeout=10)
     assert r.status_code in (401, 422)
     return True
 
-@test("F3.3 Cron status")
+@e2e_test("F3.3 Cron status")
 def test_cron_status():
     r = httpx.get(
         f"{ECP_SERVER}/v1/internal/cron-status",
@@ -168,7 +168,7 @@ def test_cron_status():
 
 # ── F4: Verification ───────────────────────────────────────────────────────
 
-@test("F4.1 Merkle verify — valid tree (SDK-compatible)")
+@e2e_test("F4.1 Merkle verify — valid tree (SDK-compatible)")
 def test_merkle_valid():
     # Use sha256: prefix to match SDK convention
     def sha256_prefixed(data: str) -> str:
@@ -189,7 +189,7 @@ def test_merkle_valid():
     assert data["valid"] is True, f"Expected valid but got {data}"
     return data
 
-@test("F4.2 Merkle verify — invalid root")
+@e2e_test("F4.2 Merkle verify — invalid root")
 def test_merkle_invalid():
     r = httpx.post(
         f"{ECP_SERVER}/v1/verify/merkle",
@@ -201,7 +201,7 @@ def test_merkle_invalid():
     assert data["valid"] is False
     return data
 
-@test("F4.3 Attestation lookup")
+@e2e_test("F4.3 Attestation lookup")
 def test_attestation_lookup():
     r = httpx.get(f"{ECP_SERVER}/v1/verify/0xtest_uid_12345", timeout=10)
     assert r.status_code == 200
@@ -210,7 +210,7 @@ def test_attestation_lookup():
     assert "explorer_url" in data
     return data
 
-@test("F4.4 Attestations list")
+@e2e_test("F4.4 Attestations list")
 def test_attestations_list():
     r = httpx.get(f"{ECP_SERVER}/v1/attestations", timeout=10)
     assert r.status_code == 200
@@ -221,7 +221,7 @@ def test_attestations_list():
 
 # ── F5: Webhook Token ──────────────────────────────────────────────────────
 
-@test("F5.1 Old webhook token rejected")
+@e2e_test("F5.1 Old webhook token rejected")
 def test_old_webhook_token():
     r = httpx.post(
         f"{LLACHAT_API}/v1/internal/ecp-webhook",

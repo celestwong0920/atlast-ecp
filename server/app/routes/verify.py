@@ -69,6 +69,9 @@ async def verify_merkle(req: MerkleVerifyRequest):
     computed = _compute_merkle_root(req.record_hashes)
     match = computed == req.merkle_root
 
+    from .metrics import merkle_verify_total
+    merkle_verify_total.labels(result="valid" if match else "invalid").inc()
+
     return {
         "valid": match,
         "expected_root": req.merkle_root,

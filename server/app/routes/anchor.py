@@ -64,6 +64,11 @@ async def _anchor_pending():
     from .verify import record_anchor_stats
     record_anchor_stats(anchored, errors)
 
+    # Prometheus counters
+    from .metrics import anchor_total, anchor_latency
+    anchor_total.labels(status="success").inc(anchored)
+    anchor_total.labels(status="error").inc(errors)
+
     logger.info("anchor_cron_done", processed=len(batches), anchored=anchored, errors=errors)
     return {"processed": len(batches), "anchored": anchored, "errors": errors}
 

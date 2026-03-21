@@ -73,10 +73,14 @@ async def _scheduled_anchor():
         _cron_state["last_result"] = result
         _cron_state["last_error"] = None
         _cron_state["consecutive_failures"] = 0
+        from .routes.metrics import cron_failures
+        cron_failures.set(0)
         logger.info("cron_anchor_done", **result)
     except Exception as e:
         _cron_state["last_error"] = str(e)
         _cron_state["consecutive_failures"] += 1
+        from .routes.metrics import cron_failures
+        cron_failures.set(_cron_state["consecutive_failures"])
         logger.error("cron_anchor_failed", error=str(e), consecutive=_cron_state["consecutive_failures"])
         if _cron_state["consecutive_failures"] >= 3 and settings.SENTRY_DSN:
             import sentry_sdk
@@ -135,9 +139,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Rate limiting
+# Rate limiting — SlowAPIMiddleware applies default_limits to all routes
+from slowapi.middleware import SlowAPIMiddleware
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # CORS — production-safe origins
 app.add_middleware(

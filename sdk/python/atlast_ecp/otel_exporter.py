@@ -13,7 +13,10 @@ Architecture:
 """
 
 
+import warnings
 from typing import Sequence
+
+_WARNED = False
 
 try:
     from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
@@ -67,6 +70,13 @@ if HAS_OTEL:
         """
 
         def __init__(self):
+            global _WARNED
+            if not _WARNED:
+                warnings.warn(
+                    "atlast_ecp.otel_exporter is experimental and may change in future versions.",
+                    FutureWarning, stacklevel=2,
+                )
+                _WARNED = True
             from .core import record as _record
             self._record = _record
 

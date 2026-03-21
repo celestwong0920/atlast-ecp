@@ -53,20 +53,34 @@ def fire_webhook(
     """
     POST webhook payload to url. Fail-open: returns False on failure, never raises.
 
+    Payload is serialized with compact separators + sort_keys for deterministic
+    HMAC-SHA256 signing (matches ECP Server webhook format exactly).
+
     Args:
         payload: JSON-serializable dict
         url: Target webhook URL
-        token: Value for X-ECP-Webhook-Token header (optional)
+        token: Value for X-ECP-Webhook-Token header (optional, also used as HMAC key)
         timeout: Request timeout in seconds
 
     Returns:
         True if 2xx response, False otherwise
     """
+    import hashlib
+    import hmac as hmac_mod
+
     headers = {"Content-Type": "application/json"}
     if token:
         headers["X-ECP-Webhook-Token"] = token
 
-    data = json.dumps(payload).encode("utf-8")
+    # Deterministic serialization — same bytes for signing and sending
+    data = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+    # HMAC-SHA256 signature (matches ECP Server webhook.py exactly)
+    if token:
+        signature = hmac_mod.new(
+            token.encode(), data, hashlib.sha256
+        ).hexdigest()
+        headers["X-ECP-Signature"] = f"sha256={signature}"
 
     for attempt in range(1 + MAX_RETRIES):
         try:

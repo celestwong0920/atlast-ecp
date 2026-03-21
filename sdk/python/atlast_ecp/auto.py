@@ -61,6 +61,11 @@ def init(agent_id: Optional[str] = None, agent_name: Optional[str] = None, ecp_d
     """
     global _initialized
 
+    warnings.warn(
+        "atlast_ecp.auto (init) is experimental and may change in future versions.",
+        FutureWarning, stacklevel=2,
+    )
+
     with _init_lock:
         if _initialized:
             from .core import get_identity

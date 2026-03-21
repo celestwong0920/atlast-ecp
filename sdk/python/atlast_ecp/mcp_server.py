@@ -15,7 +15,10 @@ Usage (Claude Desktop / Claude Code / any MCP-compatible platform):
 
 import json
 import sys
+import warnings
 from typing import Any
+
+_WARNED = False
 
 
 def _server_base() -> str:
@@ -424,6 +427,13 @@ def run_stdio_server():
     Run MCP Server over stdio (JSON-RPC 2.0).
     This is the standard MCP transport used by Claude Code and OpenClaw.
     """
+    global _WARNED
+    if not _WARNED:
+        warnings.warn(
+            "atlast_ecp.mcp_server is experimental and may change in future versions.",
+            FutureWarning, stacklevel=2,
+        )
+        _WARNED = True
     import sys
 
     def send(obj: dict):

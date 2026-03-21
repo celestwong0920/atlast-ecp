@@ -13,6 +13,9 @@ Usage:
 
 import json
 import os
+import warnings
+
+_WARNED = False
 import sys
 import time
 import hashlib
@@ -29,6 +32,13 @@ def scan_session_file(jsonl_path: str, since_ts: Optional[str] = None) -> list[d
     Parse an OpenClaw session .jsonl file and extract LLM interactions.
     Returns list of {input, output, model, tokens_in, tokens_out, latency_ms, timestamp}.
     """
+    global _WARNED
+    if not _WARNED:
+        warnings.warn(
+            "atlast_ecp.openclaw_scanner is experimental and may change in future versions.",
+            FutureWarning, stacklevel=2,
+        )
+        _WARNED = True
     interactions = []
     messages = []
 
