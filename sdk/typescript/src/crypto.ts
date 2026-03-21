@@ -32,7 +32,7 @@ export function generateDID(): string {
 }
 
 export function buildMerkleRoot(hashes: string[]): string {
-  if (hashes.length === 0) return sha256('');
+  if (hashes.length === 0) return sha256('empty');
   if (hashes.length === 1) return hashes[0];
 
   const next: string[] = [];
