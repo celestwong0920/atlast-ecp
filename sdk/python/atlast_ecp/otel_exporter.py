@@ -12,13 +12,6 @@ Architecture:
     OTel Instrumentor → OTel Span → ECPSpanExporter → core.record() → .ecp/
 """
 
-import warnings
-warnings.warn(
-    'atlast_ecp.otel_exporter is experimental and may change in future versions.',
-    stacklevel=2,
-    category=FutureWarning,
-)
-
 
 from typing import Sequence
 
