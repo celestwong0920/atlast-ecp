@@ -25,6 +25,7 @@ Streaming support:
 
 import time
 import threading
+from typing import Optional
 from functools import wraps
 
 from .core import record_async
@@ -413,6 +414,7 @@ def _wrap_litellm(module, session_id=None):
                 model=str(model),
                 t_start=t_start,
                 provider="openai",  # LiteLLM uses OpenAI-compatible format
+                session_id=session_id,
             )
 
         latency_ms = int((time.time() - t_start) * 1000)
@@ -446,7 +448,7 @@ def _wrap_litellm(module, session_id=None):
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
-def wrap(client, session_id: str = None):
+def wrap(client, session_id: Optional[str] = None):
     """
     Wrap any supported LLM client with ECP passive recording.
 

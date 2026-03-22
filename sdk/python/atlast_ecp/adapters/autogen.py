@@ -62,7 +62,7 @@ class ATLASTAutoGenMiddleware:
         """Create an ECP v1.0 record."""
         from ..record import create_minimal_record
 
-        meta = {"duration_ms": duration_ms}
+        meta: dict[str, Any] = {"duration_ms": duration_ms}
         if self.session_id:
             meta["session_id"] = self.session_id
         if meta_extra:

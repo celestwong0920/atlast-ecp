@@ -4,6 +4,22 @@
 
 import { createHash, randomBytes, generateKeyPairSync, sign, verify, createPrivateKey, createPublicKey } from 'crypto';
 
+/**
+ * Recursively sort all object keys and produce deterministic JSON.
+ * Matches Python's json.dumps(obj, sort_keys=True, separators=(",",":")).
+ */
+function stableStringify(obj: unknown): string {
+  if (obj === null || obj === undefined) return 'null';
+  if (typeof obj === 'string') return JSON.stringify(obj);
+  if (typeof obj === 'number' || typeof obj === 'boolean') return String(obj);
+  if (Array.isArray(obj)) return '[' + obj.map(stableStringify).join(',') + ']';
+  if (typeof obj === 'object') {
+    const keys = Object.keys(obj as Record<string, unknown>).sort();
+    return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify((obj as Record<string, unknown>)[k])).join(',') + '}';
+  }
+  return String(obj);
+}
+
 export function sha256(data: string): string {
   return 'sha256:' + createHash('sha256').update(data).digest('hex');
 }
@@ -17,8 +33,8 @@ export function hashRecord(record: Record<string, unknown>): string {
   // Zero out chain.hash and sig before hashing
   const clone = JSON.parse(JSON.stringify(record));
   if (clone.chain) clone.chain.hash = '';
-  delete clone.sig;
-  const canonical = JSON.stringify(clone, Object.keys(clone).sort());
+  clone.sig = '';
+  const canonical = stableStringify(clone);
   return sha256(canonical);
 }
 
