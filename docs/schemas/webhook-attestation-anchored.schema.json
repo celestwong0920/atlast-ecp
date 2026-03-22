@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weba0.com/schemas/webhook-attestation-anchored.json",
+  "title": "ECP Webhook — attestation.anchored",
+  "description": "Webhook payload sent by ATLAST ECP Server to LLaChat when a batch is anchored on-chain. Signed with HMAC-SHA256 (X-ECP-Signature header).",
+  "type": "object",
+  "required": ["event", "cert_id", "agent_did", "task_name", "batch_merkle_root", "record_count", "attestation_uid", "schema_uid", "chain_id", "on_chain", "created_at"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "attestation.anchored"
+    },
+    "cert_id": {
+      "type": "string",
+      "description": "Batch ID used as certificate identifier"
+    },
+    "agent_did": {
+      "type": "string",
+      "pattern": "^did:ecp:[0-9a-f]{32}$"
+    },
+    "task_name": {
+      "type": "string",
+      "description": "Human-readable description, e.g. 'ECP Certification: 42 records anchored on-chain'"
+    },
+    "batch_merkle_root": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "record_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "attestation_uid": {
+      "type": "string",
+      "description": "EAS attestation UID (0x{hex} for live, stub_{hex} for test)"
+    },
+    "eas_tx_hash": {
+      "type": ["string", "null"],
+      "description": "Ethereum transaction hash (null in stub mode)"
+    },
+    "schema_uid": {
+      "type": "string",
+      "description": "EAS schema UID"
+    },
+    "chain_id": {
+      "type": "integer",
+      "description": "84532 (Base Sepolia) or 8453 (Base mainnet)"
+    },
+    "on_chain": {
+      "type": "boolean",
+      "description": "True if attestation is on-chain"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp"
+    }
+  },
+  "additionalProperties": false
+}

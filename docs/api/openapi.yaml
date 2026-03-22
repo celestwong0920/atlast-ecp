@@ -1,0 +1,519 @@
+openapi: 3.1.0
+info:
+  title: ATLAST ECP Server
+  description: |
+    Evidence Chain Protocol Server — EAS anchoring, verification, and webhook dispatch.
+    
+    Part of the ATLAST Protocol (Agent-Layer Accountability Standards & Transactions).
+  version: 1.0.0
+  contact:
+    name: ATLAST Protocol Working Group
+    email: team@weba0.com
+    url: https://weba0.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.weba0.com
+    description: Production (Base Sepolia)
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Health
+    description: Server health and service discovery
+  - name: Verify
+    description: Public verification endpoints (no auth required)
+  - name: Attestations
+    description: Query anchored attestations (no auth required)
+  - name: Internal
+    description: Internal endpoints (X-Internal-Token required in production)
+  - name: Metrics
+    description: Prometheus metrics
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /v1/health:
+    get:
+      tags: [Health]
+      summary: Health check (versioned)
+      operationId: healthCheckV1
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /.well-known/ecp.json:
+    get:
+      tags: [Health]
+      summary: ECP service discovery
+      operationId: ecpDiscovery
+      description: Returns server capabilities, endpoints, and EAS configuration.
+      responses:
+        '200':
+          description: Discovery document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryResponse'
+
+  /v1/stats:
+    get:
+      tags: [Verify]
+      summary: Global anchoring statistics
+      operationId: getStats
+      responses:
+        '200':
+          description: Anchoring stats since last server restart
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsResponse'
+
+  /v1/verify/merkle:
+    post:
+      tags: [Verify]
+      summary: Verify Merkle tree integrity
+      operationId: verifyMerkle
+      description: |
+        Recompute Merkle root from record hashes and compare against expected root.
+        Pure computation — no auth required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MerkleVerifyRequest'
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MerkleVerifyResponse'
+        '400':
+          description: Empty record_hashes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/verify/{attestation_uid}:
+    get:
+      tags: [Verify]
+      summary: Check EAS attestation
+      operationId: verifyAttestation
+      parameters:
+        - name: attestation_uid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: EAS attestation UID (hex string)
+      responses:
+        '200':
+          description: Attestation metadata with explorer link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttestationVerifyResponse'
+
+  /v1/attestations:
+    get:
+      tags: [Attestations]
+      summary: List anchored attestations
+      operationId: listAttestations
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: agent_did
+          in: query
+          schema:
+            type: string
+          description: Filter by agent DID (did:ecp:{hex})
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, anchored, pending]
+            default: all
+      responses:
+        '200':
+          description: Paginated attestation list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttestationListResponse'
+
+  /v1/attestations/{batch_id}:
+    get:
+      tags: [Attestations]
+      summary: Get attestation details for a batch
+      operationId: getAttestation
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Attestation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttestationDetail'
+        '404':
+          description: Batch not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/internal/anchor-now:
+    post:
+      tags: [Internal]
+      summary: Manually trigger anchoring
+      operationId: anchorNow
+      security:
+        - InternalToken: []
+      responses:
+        '200':
+          description: Anchor result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnchorResult'
+        '401':
+          description: Invalid internal token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/internal/anchor-status:
+    get:
+      tags: [Internal]
+      summary: Anchor service status
+      operationId: anchorStatus
+      security:
+        - InternalToken: []
+      responses:
+        '200':
+          description: Anchor service configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnchorStatusResponse'
+        '401':
+          description: Invalid internal token
+
+  /v1/internal/cron-status:
+    get:
+      tags: [Internal]
+      summary: Anchor cron health
+      operationId: cronStatus
+      security:
+        - InternalToken: []
+      responses:
+        '200':
+          description: Cron health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CronStatusResponse'
+        '401':
+          description: Invalid internal token
+
+  /metrics:
+    get:
+      tags: [Metrics]
+      summary: Prometheus metrics
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Prometheus-compatible metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    InternalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: UUID token for internal service-to-service calls
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service, version]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: ecp-server
+        version:
+          type: string
+          example: 1.0.0
+        eas_chain:
+          type: string
+          example: sepolia
+        eas_stub:
+          type: string
+          example: "false"
+
+    DiscoveryResponse:
+      type: object
+      required: [ecp_version, server, server_version, endpoints, eas, capabilities]
+      properties:
+        ecp_version:
+          type: string
+          example: "1.0"
+        server:
+          type: string
+          example: atlast-ecp-server
+        server_version:
+          type: string
+          example: 1.0.0
+        endpoints:
+          type: object
+          additionalProperties:
+            type: string
+        eas:
+          type: object
+          properties:
+            chain:
+              type: string
+              example: sepolia
+            chain_id:
+              type: integer
+              example: 84532
+            schema_uid:
+              type: string
+              example: "0xa67da7e880b3fe643f0e12b754c6048fc0a0bad0ed9a932ac85a5ebf6bd9326e"
+            contract:
+              type: string
+              example: "0x4200000000000000000000000000000000000021"
+        capabilities:
+          type: array
+          items:
+            type: string
+
+    StatsResponse:
+      type: object
+      properties:
+        total_anchored:
+          type: integer
+          example: 0
+        total_errors:
+          type: integer
+          example: 0
+        total_webhooks_sent:
+          type: integer
+          example: 0
+        server_start:
+          type: string
+          format: date-time
+        eas_chain:
+          type: string
+          example: sepolia
+
+    MerkleVerifyRequest:
+      type: object
+      required: [merkle_root, record_hashes]
+      properties:
+        merkle_root:
+          type: string
+          description: Expected Merkle root (sha256:{hex})
+          example: "sha256:abc123..."
+        record_hashes:
+          type: array
+          items:
+            type: string
+          description: Leaf hashes in order (sha256:{hex})
+          minItems: 1
+
+    MerkleVerifyResponse:
+      type: object
+      required: [valid, expected_root, computed_root, record_count]
+      properties:
+        valid:
+          type: boolean
+        expected_root:
+          type: string
+        computed_root:
+          type: string
+        record_count:
+          type: integer
+
+    AttestationVerifyResponse:
+      type: object
+      properties:
+        attestation_uid:
+          type: string
+        chain:
+          type: string
+          example: sepolia
+        chain_id:
+          type: integer
+          example: 84532
+        schema_uid:
+          type: string
+        explorer_url:
+          type: string
+          format: uri
+        contract:
+          type: string
+        verified:
+          type: string
+          example: explorer_link
+
+    AttestationDetail:
+      type: object
+      properties:
+        batch_id:
+          type: string
+        agent_did:
+          type: string
+          example: "did:ecp:abc123..."
+        merkle_root:
+          type: string
+          example: "sha256:abc123..."
+        record_count:
+          type: integer
+        attestation_uid:
+          type: string
+        eas_tx_hash:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [anchored, pending]
+        explorer_url:
+          type: string
+          format: uri
+          nullable: true
+        chain:
+          type: string
+        schema_uid:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        anchored_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    AttestationListResponse:
+      type: object
+      properties:
+        attestations:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttestationDetail'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    AnchorResult:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        processed:
+          type: integer
+        anchored:
+          type: integer
+        errors:
+          type: integer
+
+    AnchorStatusResponse:
+      type: object
+      properties:
+        service:
+          type: string
+          example: ecp-anchor
+        eas_chain:
+          type: string
+        eas_stub:
+          type: string
+        webhook_url:
+          type: string
+        llachat_api:
+          type: string
+
+    CronStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded]
+        last_run:
+          type: string
+          format: date-time
+          nullable: true
+        last_result:
+          type: object
+          nullable: true
+          properties:
+            processed:
+              type: integer
+            anchored:
+              type: integer
+            errors:
+              type: integer
+        last_error:
+          type: string
+          nullable: true
+        consecutive_failures:
+          type: integer
+        next_run:
+          type: string
+          format: date-time
+          nullable: true
+        interval_minutes:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weba0.com/schemas/batch-payload.json",
+  "title": "ECP Batch Submit Payload",
+  "description": "Payload sent by ATLAST SDK to LLaChat POST /v1/batches for EAS anchoring.",
+  "type": "object",
+  "required": ["agent_did", "merkle_root", "record_count", "batch_ts", "sig"],
+  "properties": {
+    "agent_did": {
+      "type": "string",
+      "pattern": "^did:ecp:[0-9a-f]{32}$",
+      "description": "Agent DID"
+    },
+    "merkle_root": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Merkle root of all record hashes"
+    },
+    "sig": {
+      "type": "string",
+      "pattern": "^(ed25519:[0-9a-f]+|unverified)$",
+      "description": "Ed25519 signature of merkle_root"
+    },
+    "record_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of records in this batch"
+    },
+    "avg_latency_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Average latency across all records"
+    },
+    "batch_ts": {
+      "type": "integer",
+      "description": "Unix timestamp in milliseconds (NOT float seconds)"
+    },
+    "ecp_version": {
+      "type": "string",
+      "default": "0.1",
+      "description": "Batch protocol version (distinct from ECP record format version)"
+    },
+    "record_hashes": {
+      "type": "array",
+      "description": "Per-record hash entries (optional)",
+      "items": {
+        "type": "object",
+        "required": ["id", "hash", "flags"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^rec_[0-9a-f]{12,32}$"
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "flags": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "in_hash": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "description": "Optional (v0.8.0+)"
+          },
+          "out_hash": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "description": "Optional (v0.8.0+)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "flag_counts": {
+      "type": "object",
+      "description": "Aggregated flag counts (optional)",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  },
+  "additionalProperties": false
+}

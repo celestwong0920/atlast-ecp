@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weba0.com/schemas/ecp-record-v1.0.json",
+  "title": "ECP Record v1.0 (Minimal)",
+  "description": "Evidence Chain Protocol record — flat 6-field format. Content never leaves the device; only SHA-256 hashes are transmitted.",
+  "type": "object",
+  "required": ["ecp", "id", "ts", "agent", "action", "in_hash", "out_hash"],
+  "properties": {
+    "ecp": {
+      "type": "string",
+      "const": "1.0",
+      "description": "ECP record format version"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^rec_[0-9a-f]{12,32}$",
+      "description": "Unique record ID (rec_ + hex)"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp (UTC)"
+    },
+    "agent": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Agent identifier (free-form string or DID)"
+    },
+    "action": {
+      "type": "string",
+      "enum": ["llm_call", "tool_call", "message", "a2a_call"],
+      "description": "Action type"
+    },
+    "in_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 hash of input content"
+    },
+    "out_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 hash of output content"
+    },
+    "meta": {
+      "type": "object",
+      "description": "Optional metadata (model, tokens, latency, etc.)",
+      "properties": {
+        "model": { "type": "string" },
+        "tokens_in": { "type": "integer", "minimum": 0 },
+        "tokens_out": { "type": "integer", "minimum": 0 },
+        "latency_ms": { "type": "integer", "minimum": 0 },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["retried", "hedged", "incomplete", "high_latency", "error", "human_review", "a2a_delegated"]
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
