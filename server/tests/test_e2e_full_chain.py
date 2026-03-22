@@ -42,11 +42,10 @@ def e2e_test(name):
                 else:
                     print(f"  ✅ {name}")
                     passed += 1
-                return result
+                # Don't return result to avoid PytestReturnNotNoneWarning
             except Exception as e:
                 print(f"  ❌ {name} — {e}")
                 failed += 1
-                return None
         return wrapper
     return decorator
 
