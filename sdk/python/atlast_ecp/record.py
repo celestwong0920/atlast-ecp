@@ -36,6 +36,9 @@ class ECPStep:
     tokens_out: Optional[int] = None
     cost_usd: Optional[float] = None
     parent_agent: Optional[str] = None   # for A2A scenarios
+    session_id: Optional[str] = None     # group records from same task/session
+    delegation_id: Optional[str] = None  # link parent's a2a_call to sub-agent chain
+    delegation_depth: Optional[int] = None  # 0=root, 1=sub, 2=sub-sub
 
 
 @dataclass
@@ -120,6 +123,9 @@ def create_record(
     latency_ms: int = 0,
     flags: Optional[list] = None,
     parent_agent: Optional[str] = None,
+    session_id: Optional[str] = None,
+    delegation_id: Optional[str] = None,
+    delegation_depth: Optional[int] = None,
     # ── Aliases for DX consistency ──
     agent_id: Optional[str] = None,
     agent: Optional[str] = None,
@@ -180,6 +186,9 @@ def create_record(
         tokens_in=tokens_in,
         tokens_out=tokens_out,
         parent_agent=parent_agent,
+        session_id=session_id,
+        delegation_id=delegation_id,
+        delegation_depth=delegation_depth,
     )
 
     # Build partial record dict for chain hash computation
@@ -248,6 +257,12 @@ def record_to_dict(record: ECPRecord) -> dict[str, Any]:
         step_dict["cost_usd"] = step.cost_usd
     if step.parent_agent:
         step_dict["parent_agent"] = step.parent_agent
+    if step.session_id:
+        step_dict["session_id"] = step.session_id
+    if step.delegation_id:
+        step_dict["delegation_id"] = step.delegation_id
+    if step.delegation_depth is not None:
+        step_dict["delegation_depth"] = step.delegation_depth
 
     d: dict[str, Any] = {
         "ecp": "0.1",

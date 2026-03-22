@@ -85,6 +85,10 @@ The minimum valid ECP record. Any implementation MUST support this.
 | `meta.latency_ms` | integer | Response time in milliseconds |
 | `meta.flags` | string[] | Behavioral flags (see §3) |
 | `meta.cost_usd` | float | Estimated cost in USD |
+| `meta.session_id` | string | Groups records from the same task/session |
+| `meta.delegation_id` | string | Links parent's `a2a_call` record to sub-agent chain |
+| `meta.delegation_depth` | integer | Nesting level: 0=root agent, 1=sub-agent, 2=sub-sub-agent |
+| `meta.parent_agent` | string | DID or identifier of the delegating agent |
 
 ### 2.3 Chain Extension (Optional — Level 3)
 

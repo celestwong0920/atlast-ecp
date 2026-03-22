@@ -185,6 +185,22 @@ Note: chain_integrity = 1.0 constant in Phase 1 (Atlas does not send this value)
 
 ---
 
+## 7.5 Sub-Agent Delegation Fields (v0.9.0+)
+
+New **optional** fields in ECP records for sub-agent tracking:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | string | Groups records from the same task/session |
+| `delegation_id` | string | Links parent's `a2a_call` to sub-agent's chain |
+| `delegation_depth` | int | 0=root, 1=sub-agent, 2=sub-sub-agent |
+| `parent_agent` | string | DID of the delegating agent (existing field) |
+
+**Backward compatible**: all fields are Optional. Old SDK versions omit them.
+**Alex impact**: these fields appear in `record_hashes` entries. Pydantic ignores unknown fields (no code change needed).
+
+---
+
 ## 8. Infrastructure
 
 | Component | URL | Owner |

@@ -44,9 +44,11 @@ class ATLASTAutoGenMiddleware:
     - Cross-agent messages as A2A handoff records (meta.handoff=true)
     """
 
-    def __init__(self, agent_id: str = "autogen-agent", storage_dir: Optional[str] = None):
+    def __init__(self, agent_id: str = "autogen-agent", storage_dir: Optional[str] = None,
+                 session_id: Optional[str] = None):
         self.agent_id = agent_id
         self._storage_dir = storage_dir
+        self.session_id = session_id
         self._records: list[dict] = []
 
     def _create_record(
@@ -61,6 +63,8 @@ class ATLASTAutoGenMiddleware:
         from ..record import create_minimal_record
 
         meta = {"duration_ms": duration_ms}
+        if self.session_id:
+            meta["session_id"] = self.session_id
         if meta_extra:
             meta.update(meta_extra)
 

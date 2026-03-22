@@ -41,13 +41,15 @@ class _RecordedStream:
     Fail-Open: if recording fails, the stream still works perfectly.
     """
 
-    def __init__(self, stream, *, record_fn, in_content, model, t_start, provider):
+    def __init__(self, stream, *, record_fn, in_content, model, t_start, provider,
+                 session_id=None):
         self._stream = stream
         self._record_fn = record_fn
         self._in_content = in_content
         self._model = model
         self._t_start = t_start
         self._provider = provider
+        self._session_id = session_id
         self._chunks = []
         self._recorded = False
 
@@ -105,6 +107,7 @@ class _RecordedStream:
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 latency_ms=latency_ms,
+                session_id=self._session_id,
             )
         except Exception:
             pass  # Fail-Open: recording failure NEVER affects the stream
@@ -197,7 +200,7 @@ def _is_streaming(kwargs):
 
 # ─── Client Wrappers ─────────────────────────────────────────────────────────
 
-def _wrap_anthropic(client):
+def _wrap_anthropic(client, session_id=None):
     """Wrap an Anthropic client (regular + streaming)."""
     original_create = client.messages.create
 
@@ -219,6 +222,7 @@ def _wrap_anthropic(client):
                 model=model,
                 t_start=t_start,
                 provider="anthropic",
+                session_id=session_id,
             )
 
         # Non-streaming: record immediately
@@ -246,6 +250,7 @@ def _wrap_anthropic(client):
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
+            session_id=session_id,
         )
         return response
 
@@ -268,6 +273,7 @@ def _wrap_anthropic(client):
                 model=model,
                 t_start=t_start,
                 provider="anthropic",
+                session_id=session_id,
             )
 
         client.messages.stream = recorded_stream
@@ -275,7 +281,7 @@ def _wrap_anthropic(client):
     return client
 
 
-def _wrap_openai(client):
+def _wrap_openai(client, session_id=None):
     """Wrap an OpenAI client (regular + streaming)."""
     original_create = client.chat.completions.create
 
@@ -296,6 +302,7 @@ def _wrap_openai(client):
                 model=model,
                 t_start=t_start,
                 provider="openai",
+                session_id=session_id,
             )
 
         latency_ms = int((time.time() - t_start) * 1000)
@@ -319,6 +326,7 @@ def _wrap_openai(client):
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
+            session_id=session_id,
         )
         return response
 
@@ -326,7 +334,7 @@ def _wrap_openai(client):
     return client
 
 
-def _wrap_gemini(client):
+def _wrap_gemini(client, session_id=None):
     """Wrap a Google Gemini GenerativeModel (regular + streaming)."""
     original_generate = client.generate_content
 
@@ -347,6 +355,7 @@ def _wrap_gemini(client):
                 model=model,
                 t_start=t_start,
                 provider="gemini",
+                session_id=session_id,
             )
 
         latency_ms = int((time.time() - t_start) * 1000)
@@ -371,6 +380,7 @@ def _wrap_gemini(client):
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
+            session_id=session_id,
         )
         return response
 
@@ -378,7 +388,7 @@ def _wrap_gemini(client):
     return client
 
 
-def _wrap_litellm(module):
+def _wrap_litellm(module, session_id=None):
     """
     Wrap litellm module's completion() function (regular + streaming).
     Unlike other wrappers, this patches the module, not a client instance.
@@ -426,6 +436,7 @@ def _wrap_litellm(module):
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=latency_ms,
+            session_id=session_id,
         )
         return response
 
@@ -435,7 +446,7 @@ def _wrap_litellm(module):
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
-def wrap(client):
+def wrap(client, session_id: str = None):
     """
     Wrap any supported LLM client with ECP passive recording.
 
@@ -463,21 +474,21 @@ def wrap(client):
 
         # Anthropic
         if "anthropic" in module_name.lower() or class_name == "Anthropic":
-            return _wrap_anthropic(client)
+            return _wrap_anthropic(client, session_id=session_id)
 
         # OpenAI / Azure
         if "openai" in module_name.lower() or class_name in ("OpenAI", "AzureOpenAI"):
-            return _wrap_openai(client)
+            return _wrap_openai(client, session_id=session_id)
 
         # Google Gemini
         if "google" in module_name.lower() or class_name == "GenerativeModel":
             if hasattr(client, "generate_content"):
-                return _wrap_gemini(client)
+                return _wrap_gemini(client, session_id=session_id)
 
         # LiteLLM (module, not instance)
         if hasattr(client, "completion") and hasattr(client, "acompletion"):
             if getattr(client, "__name__", "") == "litellm":
-                return _wrap_litellm(client)
+                return _wrap_litellm(client, session_id=session_id)
 
         # Unknown client — return as-is (fail-open)
         return client

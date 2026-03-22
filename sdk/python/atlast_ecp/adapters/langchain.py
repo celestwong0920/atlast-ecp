@@ -57,11 +57,13 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
         verbose: Print ECP record IDs to stdout (default: False)
     """
 
-    def __init__(self, agent: str = "langchain-agent", verbose: bool = False):
+    def __init__(self, agent: str = "langchain-agent", verbose: bool = False,
+                 session_id: Optional[str] = None):
         if HAS_LANGCHAIN:
             super().__init__()
         self.agent = agent
         self.verbose = verbose
+        self.session_id = session_id
         # Track in-flight calls: run_id → {start_time, input, ...}
         self._inflight: dict[str, dict] = {}
         self._record_count = 0
@@ -92,6 +94,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
                     or kwargs.get("invocation_params", {}).get("model")
                     or kwargs.get("invocation_params", {}).get("model_name")
                     or "unknown",
+                "parent_run_id": str(parent_run_id) if parent_run_id else None,
             }
         except Exception:
             pass  # Fail-Open
@@ -131,6 +134,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
                 "input": "\n".join(msg_text),
                 "action": "llm_call",
                 "model": model,
+                "parent_run_id": str(parent_run_id) if parent_run_id else None,
             }
         except Exception:
             pass  # Fail-Open
@@ -175,6 +179,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
                 latency_ms=latency_ms,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
+                parent_run_id=info.get("parent_run_id"),
             )
         except Exception:
             pass  # Fail-Open
@@ -199,6 +204,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
                 action=info["action"],
                 model=info.get("model"),
                 latency_ms=latency_ms,
+                parent_run_id=info.get("parent_run_id"),
             )
         except Exception:
             pass
@@ -221,6 +227,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
                 "input": f"[{tool_name}] {input_str}",
                 "action": "tool_call",
                 "tool_name": tool_name,
+                "parent_run_id": str(parent_run_id) if parent_run_id else None,
             }
         except Exception:
             pass
@@ -243,6 +250,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
                 output_content=str(output),
                 action="tool_call",
                 latency_ms=latency_ms,
+                parent_run_id=info.get("parent_run_id"),
             )
         except Exception:
             pass
@@ -265,6 +273,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
                 output_content=f"ERROR: {type(error).__name__}: {error}",
                 action="tool_call",
                 latency_ms=latency_ms,
+                parent_run_id=info.get("parent_run_id"),
             )
         except Exception:
             pass
@@ -285,6 +294,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
                 "start": time.time(),
                 "input": query,
                 "action": "tool_call",
+                "parent_run_id": str(parent_run_id) if parent_run_id else None,
             }
         except Exception:
             pass
@@ -315,6 +325,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
                 output_content=output,
                 action="tool_call",
                 latency_ms=latency_ms,
+                parent_run_id=info.get("parent_run_id"),
             )
         except Exception:
             pass
@@ -322,7 +333,8 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
     # ─── Internal ─────────────────────────────────────────────────────────
 
     def _do_record(self, input_content, output_content, action="llm_call",
-                   model=None, latency_ms=0, tokens_in=None, tokens_out=None):
+                   model=None, latency_ms=0, tokens_in=None, tokens_out=None,
+                   parent_run_id=None):
         """Create and save an ECP record. Fail-Open."""
         try:
             from atlast_ecp.core import record_minimal
@@ -335,6 +347,9 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
                 latency_ms=latency_ms,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
+                session_id=self.session_id,
+                delegation_id=parent_run_id,
+                delegation_depth=1 if parent_run_id else 0,
             )
             self._record_count += 1
             if self.verbose and rid:

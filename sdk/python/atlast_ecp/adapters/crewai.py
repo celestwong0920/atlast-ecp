@@ -40,9 +40,11 @@ class ATLASTCrewCallback:
         verbose: Print ECP record IDs to stdout (default: False)
     """
 
-    def __init__(self, agent: str = "crewai-agent", verbose: bool = False):
+    def __init__(self, agent: str = "crewai-agent", verbose: bool = False,
+                 session_id: Optional[str] = None):
         self.agent = agent
         self.verbose = verbose
+        self.session_id = session_id
         self._record_count = 0
         self._task_starts: dict[str, float] = {}
 
@@ -142,7 +144,8 @@ class ATLASTCrewCallback:
             pass
 
     def _do_record(self, input_content, output_content, action="llm_call",
-                   agent_name=None, model=None, latency_ms=0):
+                   agent_name=None, model=None, latency_ms=0,
+                   delegation_depth=0):
         """Create and save an ECP record. Fail-Open."""
         try:
             from atlast_ecp.core import record_minimal
@@ -153,6 +156,8 @@ class ATLASTCrewCallback:
                 action=action,
                 model=model,
                 latency_ms=latency_ms,
+                session_id=self.session_id,
+                delegation_depth=delegation_depth,
             )
             self._record_count += 1
             if self.verbose and rid:

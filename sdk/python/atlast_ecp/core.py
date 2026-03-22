@@ -70,6 +70,9 @@ def record(
     is_retry: Optional[bool] = None,
     local_summary: Optional[str] = None,
     parent_agent: Optional[str] = None,
+    session_id: Optional[str] = None,
+    delegation_id: Optional[str] = None,
+    delegation_depth: Optional[int] = None,
 ) -> Optional[str]:
     """
     ECP's single unified interface.
@@ -113,6 +116,9 @@ def record(
             latency_ms=latency_ms,
             flags=flags,
             parent_agent=parent_agent,
+            session_id=session_id,
+            delegation_id=delegation_id,
+            delegation_depth=delegation_depth,
         )
 
         # Save locally
@@ -166,6 +172,9 @@ def record_minimal(
     latency_ms: int = 0,
     tokens_in: Optional[int] = None,
     tokens_out: Optional[int] = None,
+    session_id: Optional[str] = None,
+    delegation_id: Optional[str] = None,
+    delegation_depth: Optional[int] = None,
 ) -> Optional[str]:
     """
     Minimal ECP recording. No identity, no chain, no signature.
@@ -191,6 +200,12 @@ def record_minimal(
             meta["tokens_out"] = tokens_out
         if flags:
             meta["flags"] = flags
+        if session_id:
+            meta["session_id"] = session_id
+        if delegation_id:
+            meta["delegation_id"] = delegation_id
+        if delegation_depth is not None:
+            meta["delegation_depth"] = delegation_depth
 
         rec = create_minimal_record(
             agent=agent,
