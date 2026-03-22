@@ -162,7 +162,7 @@ Header:     X-ECP-Signature: sha256={hex_digest}
 |-----------|-----|-------|
 | ECP Server | `https://api.weba0.com` | Atlas (Railway) |
 | LLaChat API | `https://api.llachat.com` | Alex (Railway) |
-| SDK | PyPI `atlast-ecp` v0.7.0 | Atlas |
+| SDK | PyPI `atlast-ecp` v0.8.0 | Atlas |
 | Monorepo | `github.com/willau95/atlast-ecp` | Shared |
 
 ---
