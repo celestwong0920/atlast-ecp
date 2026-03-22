@@ -2,6 +2,29 @@
 
 All notable changes to the ATLAST ECP SDK and Server.
 
+## [0.8.1] — 2026-03-23 (Phase 7 — Deep Audit + Quality)
+
+### Fixed
+- **CRITICAL**: Chain hash computation missing 5 optional fields (cost_usd, parent_agent, session_id, delegation_id, delegation_depth) — records with these fields would fail verification
+- **CRITICAL**: Cross-SDK hash inconsistency — TS SDK `delete sig` vs Python `sig=""`, shallow vs deep key sorting
+- LiteLLM streaming path missing `session_id` in `_RecordedStream` call
+- mypy type errors in `autogen.py` (dict inference) and `wrap.py` (Optional[str])
+
+### Added
+- Multi-agent delegation fields: `session_id`, `delegation_id`, `delegation_depth` across entire stack
+- `chain_integrity` real-time signal in batch upload (no longer hardcoded 1.0)
+- `speed_anomaly` as 8th behavioral flag in ECP-SPEC §3
+- Server stats persistence via PostgreSQL (survives restarts)
+- EAS attestation UID precise extraction from Attested event logs
+- Super-batch aggregation design doc
+- 15 delegation-specific tests (Python 11 + TS 4)
+- `create_minimal_record()` explicit delegation parameters
+- `stableStringify()` in TS SDK for cross-SDK hash consistency
+
+### Changed
+- TS SDK field names aligned with ECP-SPEC: `agent_id`→`agent`, `step_type`→`action`, `input_hash`→`in_hash`, `output_hash`→`out_hash`
+- Test count: 750 → **765** (Python 680 + Server 42 + TS 43)
+
 ## [0.8.0] — 2026-03-21 (Phase 5)
 
 ### Added
