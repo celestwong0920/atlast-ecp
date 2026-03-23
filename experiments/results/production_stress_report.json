@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-03-23T18:23:36+0800",
+  "summary": "1/1 passed",
+  "tests": [
+    {
+      "name": "ST4: Server Load (20 RPS \u00d7 10s)",
+      "passed": true,
+      "duration_s": 10.45,
+      "details": {
+        "total_requests": 200,
+        "status_counts": {
+          "200": 200
+        },
+        "success_rate": "100.0%",
+        "latency_p50_ms": "353.4",
+        "latency_p95_ms": "543.7",
+        "latency_p99_ms": "672.8",
+        "actual_rps": "19.1"
+      },
+      "errors": []
+    }
+  ]
+}
