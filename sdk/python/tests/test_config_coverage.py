@@ -72,7 +72,12 @@ class TestGetApiUrl:
     def test_env_var_takes_priority(self, monkeypatch):
         monkeypatch.setenv("ATLAST_API_URL", "https://env.example.com/")
         from atlast_ecp.config import get_api_url
-        assert get_api_url() == "https://env.example.com"
+        assert get_api_url() == "https://env.example.com/v1"
+
+    def test_env_var_with_v1_not_doubled(self, monkeypatch):
+        monkeypatch.setenv("ATLAST_API_URL", "https://env.example.com/v1")
+        from atlast_ecp.config import get_api_url
+        assert get_api_url() == "https://env.example.com/v1"
 
     def test_config_endpoint_fallback(self, tmp_path, monkeypatch):
         from atlast_ecp import config as cfg_mod
@@ -81,7 +86,7 @@ class TestGetApiUrl:
         monkeypatch.setattr(cfg_mod, "CONFIG_FILE", cfg_file)
         monkeypatch.delenv("ATLAST_API_URL", raising=False)
         from atlast_ecp.config import get_api_url
-        assert get_api_url() == "https://config.example.com"
+        assert get_api_url() == "https://config.example.com/v1"
 
     def test_default_empty_when_nothing_set(self, tmp_path, monkeypatch):
         from atlast_ecp import config as cfg_mod

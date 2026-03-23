@@ -45,13 +45,20 @@ def save_config(data: dict):
 def get_api_url() -> str:
     """
     Get API URL with priority: env ATLAST_API_URL > config endpoint > default.
+    Always ensures the URL ends with /v1 (the API prefix).
     """
     env_url = os.environ.get("ATLAST_API_URL")
     if env_url:
-        return env_url.rstrip("/")
+        url = env_url.rstrip("/")
+        if not url.endswith("/v1"):
+            url = url + "/v1"
+        return url
     cfg = load_config()
     if cfg.get("endpoint"):
-        return cfg["endpoint"].rstrip("/")
+        url = cfg["endpoint"].rstrip("/")
+        if not url.endswith("/v1"):
+            url = url + "/v1"
+        return url
     return DEFAULT_ENDPOINT
 
 
