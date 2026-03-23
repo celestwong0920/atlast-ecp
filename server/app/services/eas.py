@@ -134,23 +134,29 @@ async def _live_attestation(
     loop = asyncio.get_event_loop()
 
     def _send_tx():
-        tx = eas.functions.attest((
-            bytes.fromhex(schema_uid[2:] if schema_uid.startswith("0x") else schema_uid),
-            (
-                "0x0000000000000000000000000000000000000000",  # recipient
-                0,      # expirationTime
-                False,  # revocable (matches on-chain schema)
-                b'\x00' * 32,  # refUID
-                encoded_data,   # data
-                0,      # value
-            ),
-        )).build_transaction({
+        # Build raw calldata (web3.py ABI encoder has issues with nested tuples)
+        from web3 import Web3 as W3
+        selector = W3.keccak(text='attest((bytes32,(address,uint64,bool,bytes32,bytes,uint256)))')[:4]
+        from eth_abi import encode as raw_encode
+        schema_b = bytes.fromhex(schema_uid[2:] if schema_uid.startswith("0x") else schema_uid)
+        calldata = selector + raw_encode(
+            ['(bytes32,(address,uint64,bool,bytes32,bytes,uint256))'],
+            [(schema_b, ('0x0000000000000000000000000000000000000000', 0, True, b'\x00'*32, encoded_data, 0))]
+        )
+
+        base_fee = w3.eth.get_block('latest').baseFeePerGas
+        tx = {
             "from": account.address,
+            "to": EAS_CONTRACT,
+            "data": calldata,
             "nonce": w3.eth.get_transaction_count(account.address),
             "gas": 500000,
-            "gasPrice": w3.eth.gas_price,
+            "maxFeePerGas": base_fee * 3,
+            "maxPriorityFeePerGas": w3.to_wei(0.001, 'gwei'),
             "chainId": BASE_CHAIN_ID,
-        })
+            "value": 0,
+            "type": 2,
+        }
         signed = account.sign_transaction(tx)
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
         receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=30)
