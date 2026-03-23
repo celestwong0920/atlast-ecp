@@ -42,3 +42,6 @@ sdk/.ecp/
 __pycache__/
 *.pyc
 __pycache__/
+docs-site/.vitepress/cache
+docs-site/.vitepress/dist
+docs-site/node_modules
