@@ -37,6 +37,7 @@ export default defineConfig({
             { text: 'Proof Package', link: '/guide/proof-package' },
             { text: 'Chain Integrity', link: '/guide/chain-integrity' },
             { text: 'Trust Signals', link: '/guide/trust-signals' },
+            { text: 'Recovery & Backup', link: '/guide/recovery' },
           ],
         },
       ],

@@ -112,7 +112,7 @@ def _create_identity(edir: Path | None = None) -> dict:
     Legacy flow (without cryptography):
       Random hex fallback, no mnemonic support.
     """
-    edir = edir or _resolve_ecp_dir()
+    edir = Path(edir) if edir else _resolve_ecp_dir()
     ifile = edir / "identity.json"
     edir.mkdir(exist_ok=True)  # ensure dir exists before writing
     
