@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
+  base: '/atlast-ecp/',
   title: 'ATLAST Protocol',
   description: 'Evidence Chain Protocol — Trust Infrastructure for the Agent Economy',
   head: [
