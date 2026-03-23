@@ -31,21 +31,20 @@ from uuid import UUID
 
 # LangChain is an optional dependency — import at runtime
 try:
-    from langchain_core.callbacks import BaseCallbackHandler
-    from langchain_core.outputs import LLMResult, ChatResult
+    from langchain_core.callbacks import BaseCallbackHandler  # type: ignore[import-untyped]
+    from langchain_core.outputs import LLMResult, ChatResult  # type: ignore[import-untyped]
 
     HAS_LANGCHAIN = True
 except ImportError:
     try:
         # Fallback for older langchain versions
-        from langchain.callbacks.base import BaseCallbackHandler
-        from langchain.schema import LLMResult
+        from langchain.callbacks.base import BaseCallbackHandler  # type: ignore[import-untyped,no-redef]
+        from langchain.schema import LLMResult  # type: ignore[import-untyped,no-redef]
 
         HAS_LANGCHAIN = True
     except ImportError:
         HAS_LANGCHAIN = False
-        # Create a stub so the class definition doesn't fail
-        BaseCallbackHandler = object
+        BaseCallbackHandler = object  # type: ignore[assignment,misc]
 
 
 class ATLASTCallbackHandler(BaseCallbackHandler):
@@ -186,7 +185,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
 
     def on_llm_error(
         self,
-        error: Union[Exception, KeyboardInterrupt],
+        error: BaseException,
         *,
         run_id: UUID,
         parent_run_id: Optional[UUID] = None,
@@ -257,7 +256,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
 
     def on_tool_error(
         self,
-        error: Union[Exception, KeyboardInterrupt],
+        error: BaseException,
         *,
         run_id: UUID,
         parent_run_id: Optional[UUID] = None,
@@ -301,7 +300,7 @@ class ATLASTCallbackHandler(BaseCallbackHandler):
 
     def on_retriever_end(
         self,
-        documents: list[Any],
+        documents: Any,  # Sequence[Document] in newer langchain
         *,
         run_id: UUID,
         parent_run_id: Optional[UUID] = None,
