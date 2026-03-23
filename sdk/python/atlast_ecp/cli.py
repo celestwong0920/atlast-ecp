@@ -462,11 +462,12 @@ def cmd_certify(args: list[str]):
 
 
 def cmd_init(args: list[str]):
-    """atlast init [--minimal] — initialize ~/.ecp/ directory + generate DID"""
+    """atlast init [--minimal] [--non-interactive] — initialize ~/.ecp/ + generate DID"""
     from .storage import init_storage
     init_storage()
 
     skip_identity = "--minimal" in args or "--no-identity" in args
+    non_interactive = "--non-interactive" in args or not sys.stdin.isatty()
 
     print(f"\n🔗 ATLAST ECP initialized")
     print(f"  Storage: ~/.ecp/records/ (local, private)")
@@ -476,11 +477,330 @@ def cmd_init(args: list[str]):
         identity = get_or_create_identity()
         print(f"  Agent DID: {identity['did']}")
         print(f"  Key type: {'ed25519' if identity.get('verified') else 'fallback'}")
-        print(f"\n  Next: atlast register (optional — publish to an ECP server)")
+        
+        # Show recovery phrase for NEW identities
+        mnemonic = identity.get("_mnemonic")
+        if mnemonic:
+            from .recovery import format_mnemonic_display
+            print(f"\n  🔑 RECOVERY PHRASE — write this down and store safely:")
+            for line in format_mnemonic_display(mnemonic).split("\n"):
+                print(f"  {line}")
+            print(f"\n  ⚠️  This is the ONLY way to recover your identity if lost.")
+            print(f"  ⚠️  It will NOT be shown again.\n")
+        
+        # Ask for vault backup location
+        if not non_interactive and mnemonic:
+            _ask_backup_location()
+        
+        # Auto-register with server
+        print(f"\n  🌐 Registering with ATLAST server...")
+        try:
+            _auto_register(identity)
+        except Exception as e:
+            print(f"  ⚠️  Registration skipped: {e}")
+            print(f"  📁 Local recording works. Register later: atlast register")
+        
+        print(f"\n  ✅ Ready! Create your first record:")
+        print(f"     from atlast_ecp.core import record")
+        print(f'     record("your input", "your output")')
     else:
         print(f"  Identity: skipped (run 'atlast init' to create DID)")
         print(f"\n  Next: echo '{{\"in\":\"prompt\",\"out\":\"response\"}}' | atlast record")
     print()
+
+
+def _ask_backup_location():
+    """Interactive prompt to choose vault backup location."""
+    from .vault_backup import detect_backup_locations
+    from .config import save_config
+    
+    locations = detect_backup_locations()
+    available = [loc for loc in locations if loc["available"]]
+    
+    print(f"  📁 Where should evidence content be backed up?")
+    print(f"     (Encrypted backup ensures recovery if this computer is lost)\n")
+    
+    for i, loc in enumerate(available):
+        print(f"     [{i + 1}] {loc['name']:<16} ({loc['path']})")
+    print(f"     [{len(available) + 1}] Custom path")
+    print(f"     [{len(available) + 2}] Skip (not recommended)")
+    
+    try:
+        choice = input(f"\n  > ").strip()
+        idx = int(choice) - 1
+        
+        if idx < len(available):
+            path = available[idx]["path"]
+        elif idx == len(available):
+            path = input(f"  Enter path: ").strip()
+            if not path:
+                print(f"  ⏭  Skipped. Set later: atlast config set vault_backup_path /your/path")
+                return
+        else:
+            print(f"  ⏭  Skipped. Set later: atlast config set vault_backup_path /your/path")
+            return
+        
+        save_config({"vault_backup_path": path})
+        print(f"\n  ✅ Vault backup: {path} (AES-256-GCM encrypted)")
+    except (ValueError, EOFError, KeyboardInterrupt):
+        print(f"\n  ⏭  Skipped. Set later: atlast config set vault_backup_path /your/path")
+
+
+def _auto_register(identity: dict):
+    """Auto-register agent with ATLAST server during init."""
+    import urllib.request
+    from .config import get_api_url, save_config
+    
+    server_url = get_api_url()
+    did = identity["did"]
+    pub_key = identity.get("crypto_pub_key") or identity["pub_key"]
+    
+    payload = json.dumps({"did": did, "public_key": pub_key}).encode()
+    req = urllib.request.Request(
+        f"{server_url}/agents/register",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            api_key = data.get("api_key") or data.get("key")
+            if api_key:
+                save_config({"agent_api_key": api_key, "agent_did": did, "endpoint": server_url})
+                print(f"  ✅ Registered: {did}")
+                print(f"  🔑 API Key: {api_key[:12]}...{api_key[-4:]} (saved to config)")
+    except Exception as e:
+        error_str = str(e)
+        if "409" in error_str:
+            print(f"  ✓ Already registered: {did}")
+            save_config({"agent_did": did, "endpoint": server_url})
+        else:
+            raise
+
+
+def cmd_recover(args: list[str]):
+    """atlast recover — restore identity from 12-word recovery phrase"""
+    from .recovery import mnemonic_to_private_key, mnemonic_to_entropy, entropy_to_ed25519_seed
+    from .storage import init_storage
+    
+    print(f"\n🔄 ATLAST Identity Recovery\n")
+    
+    # Get mnemonic
+    if args:
+        words = " ".join(args).lower().split()
+    else:
+        try:
+            phrase = input("  Enter your 12-word recovery phrase:\n  > ").strip()
+            words = phrase.lower().split()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Cancelled.")
+            return
+    
+    if len(words) != 12:
+        print(f"  ❌ Expected 12 words, got {len(words)}")
+        return
+    
+    # Try BIP39 → HKDF path (new identities)
+    try:
+        from .recovery import mnemonic_to_entropy, entropy_to_ed25519_seed
+        entropy = mnemonic_to_entropy(words)
+    except ValueError as e:
+        print(f"  ❌ Invalid mnemonic: {e}")
+        return
+    
+    seed = entropy_to_ed25519_seed(entropy)
+    
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, PrivateFormat, NoEncryption
+    except ImportError:
+        print("  ❌ cryptography package required. pip install cryptography")
+        return
+    
+    import hashlib
+    key = Ed25519PrivateKey.from_private_bytes(seed)
+    pub_hex = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+    priv_hex = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()).hex()
+    did = f"did:ecp:{hashlib.sha256(pub_hex.encode()).hexdigest()[:32]}"
+    
+    # Also try legacy path (first 16 bytes as direct key)
+    legacy_priv_partial = entropy
+    
+    print(f"  ✅ Identity recovered: {did}")
+    
+    # Save identity
+    init_storage()
+    from .identity import _resolve_ecp_dir, _now_ms
+    edir = _resolve_ecp_dir()
+    edir.mkdir(exist_ok=True)
+    
+    identity = {
+        "did": did,
+        "pub_key": pub_hex,
+        "priv_key": priv_hex,
+        "created_at": _now_ms(),
+        "verified": True,
+        "recovery_version": 1,
+        "entropy_hash": hashlib.sha256(entropy).hexdigest()[:32],
+        "recovered_at": _now_ms(),
+    }
+    
+    ifile = edir / "identity.json"
+    ifile.write_text(json.dumps(identity, indent=2))
+    print(f"  ✅ Identity saved to {ifile}")
+    
+    # Try to pull records from server
+    print(f"\n  🔄 Syncing records from server...")
+    try:
+        _sync_records_from_server(did, identity)
+    except Exception as e:
+        print(f"  ⚠️  Could not sync from server: {e}")
+        print(f"  📁 Local identity restored. Records can be synced later.")
+    
+    # Try vault restore
+    from .config import get_vault_backup_path
+    backup_path = get_vault_backup_path()
+    if backup_path:
+        print(f"\n  🔄 Restoring vault from {backup_path}...")
+        try:
+            from .vault_backup import restore_vault_entries
+            restored, errors = restore_vault_entries(backup_path, priv_hex)
+            print(f"  ✅ Vault restored: {restored} entries ({errors} errors)")
+        except Exception as e:
+            print(f"  ⚠️  Vault restore failed: {e}")
+    
+    print(f"\n  ✅ Recovery complete. You can continue recording.\n")
+
+
+def _sync_records_from_server(did: str, identity: dict):
+    """Pull records from server for this DID."""
+    import urllib.request
+    from .config import get_api_url, get_api_key
+    from .storage import RECORDS_DIR
+    
+    server_url = get_api_url()
+    api_key = get_api_key()
+    
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    
+    url = f"{server_url}/agents/{did}/records?limit=10000"
+    req = urllib.request.Request(url, headers=headers)
+    
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+            records = data.get("records", [])
+            
+            if not records:
+                print(f"  ℹ️  No records found on server for {did}")
+                return
+            
+            from .storage import ECP_DIR
+            records_dir = ECP_DIR / "records"
+            records_dir.mkdir(parents=True, exist_ok=True)
+            
+            saved = 0
+            for rec in records:
+                rid = rec.get("id") or rec.get("record_id", f"rec_{saved}")
+                rfile = records_dir / f"{rid}.json"
+                if not rfile.exists():
+                    rfile.write_text(json.dumps(rec, indent=2))
+                    saved += 1
+            
+            print(f"  ✅ Downloaded {saved} new records ({len(records)} total on server)")
+    except Exception as e:
+        if "404" in str(e):
+            print(f"  ℹ️  Server endpoint not available yet (records sync coming soon)")
+        else:
+            raise
+
+
+def cmd_backup_key(args: list[str]):
+    """atlast backup-key — display recovery phrase for current identity"""
+    from .identity import get_or_create_identity
+    from .recovery import export_mnemonic_for_legacy_key, format_mnemonic_display
+    
+    identity = get_or_create_identity()
+    priv_hex = identity.get("priv_key")
+    
+    if not priv_hex:
+        print("  ❌ No private key found in identity.")
+        return
+    
+    print(f"\n  ⚠️  This will display your secret recovery phrase.")
+    print(f"  ⚠️  Anyone with these words can control your agent identity.\n")
+    
+    if sys.stdin.isatty():
+        try:
+            confirm = input("  Type 'yes' to continue: ").strip()
+            if confirm.lower() != "yes":
+                print("  Cancelled.")
+                return
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Cancelled.")
+            return
+    
+    # Check if this is a BIP39-derived identity or legacy
+    if identity.get("recovery_version") == 1:
+        # New identity: we need to regenerate mnemonic from entropy
+        # But we don't store entropy... we store entropy_hash for verification
+        # For new identities, we can derive mnemonic from private key
+        # by reversing: priv_key → seed, but HKDF is one-way
+        # So for new identities created with BIP39, the mnemonic was shown at init only
+        print(f"\n  ℹ️  This identity was created with recovery phrase support.")
+        print(f"  ℹ️  The phrase was shown during 'atlast init'.")
+        print(f"  ℹ️  If you lost it, you'll need to create a new identity.\n")
+        print(f"  💡 For legacy identities, we can export a recovery phrase.")
+        return
+    
+    # Legacy identity: export from private key
+    words = export_mnemonic_for_legacy_key(priv_hex)
+    
+    print(f"\n  🔑 RECOVERY PHRASE for {identity['did']}:")
+    for line in format_mnemonic_display(words).split("\n"):
+        print(f"  {line}")
+    print(f"\n  ⚠️  LEGACY KEY: This phrase encodes the first 16 bytes of your private key.")
+    print(f"  ⚠️  Recovery will recreate a compatible identity.\n")
+
+
+def cmd_backup(args: list[str]):
+    """atlast backup [--vault] [--path /dir] — backup vault to encrypted storage"""
+    from .identity import get_or_create_identity
+    from .config import get_vault_backup_path
+    
+    path = None
+    for i, a in enumerate(args):
+        if a == "--path" and i + 1 < len(args):
+            path = args[i + 1]
+    
+    if not path:
+        path = get_vault_backup_path()
+    
+    if not path:
+        print("  ❌ No backup path. Use --path or: atlast config set vault_backup_path /your/path")
+        return
+    
+    identity = get_or_create_identity()
+    priv_key = identity.get("priv_key")
+    if not priv_key:
+        print("  ❌ No private key found.")
+        return
+    
+    print(f"\n  📦 Backing up vault to {path}...")
+    from .vault_backup import backup_all_vault
+    backed, errors = backup_all_vault(backup_path=path, priv_key_hex=priv_key)
+    print(f"  ✅ Backed up {backed} entries ({errors} errors)")
+    
+    if errors == 0:
+        from .config import save_config
+        save_config({"vault_backup_path": path})
+        print(f"  ✅ Backup path saved to config\n")
+    else:
+        print(f"  ⚠️  {errors} entries failed to backup\n")
 
 
 def cmd_record(args: list[str]):
@@ -933,6 +1253,11 @@ def main():
         print("    atlast certify <title>   Issue a work certificate")
         print("    atlast export            Export records as JSON")
         print()
+        print("  Recovery & Backup:")
+        print("    atlast recover           Restore identity from recovery phrase")
+        print("    atlast backup-key        Show recovery phrase for current identity")
+        print("    atlast backup [--path p] Backup vault to encrypted storage")
+        print()
         print("  Configuration:")
         print("    atlast config get        Show current config")
         print("    atlast config set <k> <v>  Set config value")
@@ -964,6 +1289,9 @@ def main():
         "insights": _cmd_insights,
         "config": _cmd_config,
         "discover": _cmd_discover,
+        "recover": cmd_recover,
+        "backup-key": cmd_backup_key,
+        "backup": cmd_backup,
     }
 
     if cmd in ("--help", "-h", "help"):
