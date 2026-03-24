@@ -46,6 +46,22 @@ class Attestation(Base):
     )
 
 
+class SuperBatch(Base):
+    """Super-batch aggregation record — groups multiple agent batches into one EAS attestation."""
+    __tablename__ = "super_batches"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    super_batch_id = Column(String(64), unique=True, nullable=False, index=True)
+    super_merkle_root = Column(String(128), nullable=False)
+    attestation_uid = Column(String(128), nullable=True)
+    eas_tx_hash = Column(String(128), nullable=True)
+    batch_count = Column(Integer, nullable=False)
+    batch_ids = Column(Text, nullable=False)  # JSON array of batch_ids
+    status = Column(String(20), default="pending")
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
+    anchored_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+
 class AnchorLog(Base):
     """Cron anchor run log."""
     __tablename__ = "anchor_logs"

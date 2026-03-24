@@ -27,6 +27,9 @@ class Settings:
     # Cron
     ANCHOR_INTERVAL_MINUTES: int = int(os.getenv("ANCHOR_INTERVAL_MINUTES", "60"))
 
+    # Super-batch
+    SUPER_BATCH_MIN_SIZE: int = int(os.getenv("SUPER_BATCH_MIN_SIZE", "5"))
+
     # Monitoring
     SENTRY_DSN: str = os.getenv("SENTRY_DSN", "")
 

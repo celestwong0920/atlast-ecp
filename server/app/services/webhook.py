@@ -30,6 +30,9 @@ async def fire_attestation_webhook(
     record_count: int,
     attestation_uid: str,
     eas_tx_hash: str | None = None,
+    super_batch_id: str | None = None,
+    super_merkle_root: str | None = None,
+    inclusion_proof: list[dict] | None = None,
 ) -> bool:
     """POST webhook to LLaChat. Returns True if delivered."""
     url = settings.ECP_WEBHOOK_URL
@@ -51,6 +54,13 @@ async def fire_attestation_webhook(
         "on_chain": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    if super_batch_id is not None:
+        payload["super_batch_id"] = super_batch_id
+    if super_merkle_root is not None:
+        payload["super_merkle_root"] = super_merkle_root
+    if inclusion_proof is not None:
+        payload["inclusion_proof"] = inclusion_proof
 
     # Serialize payload once — use same bytes for signing and sending
     payload_bytes = json_lib.dumps(payload, separators=(",", ":"), sort_keys=True).encode()

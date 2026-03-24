@@ -13,6 +13,10 @@ from ..services.webhook import fire_attestation_webhook
 
 from ..db.database import get_session, Attestation
 
+from ..services.merkle import build_super_merkle_tree, get_inclusion_proof
+import json as json_lib
+import uuid as _uuid
+
 logger = structlog.get_logger()
 router = APIRouter()
 
@@ -95,6 +99,114 @@ async def _mark_local_batch_anchored(batch_id: str, attestation_uid: str, eas_tx
         logger.warning("local_batch_update_failed", batch_id=batch_id, error=str(e))
 
 
+async def _anchor_super_batch(batches: list[dict], _anchor_start: float) -> dict:
+    """Anchor multiple batches as a single super-batch with one EAS attestation."""
+    from datetime import datetime, timezone
+    import time as _time
+
+    roots = [b["merkle_root"] for b in batches]
+    super_root, _layers = build_super_merkle_tree(roots)
+    super_batch_id = f"sb_{_uuid.uuid4().hex[:16]}"
+
+    # Single EAS attestation
+    try:
+        eas_result = await write_attestation(
+            merkle_root=super_root,
+            agent_did="did:ecp:atlast-server",
+            record_count=sum(b.get("record_count", 0) for b in batches),
+            avg_latency_ms=0,
+            batch_ts=0,
+        )
+        attestation_uid = eas_result.get("attestation_uid", "")
+        eas_tx_hash = eas_result.get("tx_hash")
+    except Exception as e:
+        logger.error("super_batch_eas_failed", error=str(e))
+        return {"processed": len(batches), "anchored": 0, "errors": len(batches)}
+
+    # Store SuperBatch record
+    try:
+        from ..db.database import get_session, SuperBatch
+        session = await get_session()
+        if session is not None:
+            async with session:
+                record = SuperBatch(
+                    super_batch_id=super_batch_id,
+                    super_merkle_root=super_root,
+                    attestation_uid=attestation_uid,
+                    eas_tx_hash=eas_tx_hash,
+                    batch_count=len(batches),
+                    batch_ids=json_lib.dumps([b["batch_id"] for b in batches]),
+                    status="anchored",
+                    anchored_at=datetime.now(timezone.utc),
+                )
+                session.add(record)
+                await session.commit()
+    except Exception as e:
+        logger.warning("super_batch_db_save_failed", error=str(e))
+
+    # Update each batch and fire webhooks
+    anchored = 0
+    errors = 0
+    for i, batch in enumerate(batches):
+        try:
+            proof = get_inclusion_proof(roots, i)
+
+            if batch.get("_source") == "local":
+                await _mark_local_batch_anchored(batch["batch_id"], attestation_uid, eas_tx_hash)
+            else:
+                await mark_batch_anchored(
+                    batch_id=batch["batch_id"],
+                    attestation_uid=attestation_uid,
+                    eas_tx_hash=eas_tx_hash,
+                )
+
+            await _save_attestation(batch, attestation_uid, eas_tx_hash)
+
+            await fire_attestation_webhook(
+                batch_id=batch["batch_id"],
+                agent_did=batch["agent_did"],
+                merkle_root=batch["merkle_root"],
+                record_count=batch.get("record_count", 0),
+                attestation_uid=attestation_uid,
+                eas_tx_hash=eas_tx_hash,
+                super_batch_id=super_batch_id,
+                super_merkle_root=super_root,
+                inclusion_proof=proof,
+            )
+            anchored += 1
+        except Exception as e:
+            logger.warning("super_batch_item_failed", batch_id=batch.get("batch_id"), error=str(e))
+            errors += 1
+
+    # Stats + logs
+    from .verify import record_anchor_stats
+    record_anchor_stats(anchored, errors)
+
+    try:
+        from ..db.database import get_session, AnchorLog
+        session = await get_session()
+        if session is not None:
+            async with session:
+                log = AnchorLog(
+                    processed=len(batches),
+                    anchored=anchored,
+                    errors=errors,
+                    duration_ms=int((_time.time() - _anchor_start) * 1000),
+                    run_at=datetime.now(timezone.utc),
+                )
+                session.add(log)
+                await session.commit()
+    except Exception as e:
+        logger.warning("anchor_log_save_failed", error=str(e))
+
+    from .metrics import anchor_total, anchor_latency
+    anchor_total.labels(status="success").inc(anchored)
+    anchor_total.labels(status="error").inc(errors)
+
+    logger.info("super_batch_anchor_done", super_batch_id=super_batch_id, batch_count=len(batches), anchored=anchored, errors=errors)
+    return {"processed": len(batches), "anchored": anchored, "errors": errors, "super_batch_id": super_batch_id}
+
+
 async def _anchor_pending():
     """Core anchor logic — fetch pending batches from LLaChat + local DB, anchor to EAS, fire webhooks."""
     import time as _time
@@ -107,6 +219,11 @@ async def _anchor_pending():
 
     if not batches:
         return {"processed": 0, "anchored": 0, "errors": 0}
+
+    # Super-batch aggregation: if enough pending batches, anchor as one
+    if len(batches) >= settings.SUPER_BATCH_MIN_SIZE:
+        result = await _anchor_super_batch(batches, _anchor_start)
+        return result
 
     anchored = 0
     errors = 0
