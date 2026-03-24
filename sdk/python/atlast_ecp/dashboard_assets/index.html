@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATLAST ECP Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --text2: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+  /* Header */
+  header { display: flex; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header h1 span { color: var(--accent); }
+  .badge { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2px 10px; font-size: 12px; color: var(--text2); }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; }
+  .tab { padding: 8px 16px; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--text2); cursor: pointer; font-size: 14px; }
+  .tab:hover { color: var(--text); background: var(--surface); }
+  .tab.active { color: var(--text); background: var(--surface); border-color: var(--border); }
+
+  /* Search */
+  .search-bar { display: flex; gap: 8px; margin-bottom: 20px; }
+  .search-bar input { flex: 1; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 14px; outline: none; }
+  .search-bar input:focus { border-color: var(--accent); }
+  .search-bar button { padding: 10px 20px; background: var(--accent); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
+  .search-bar button:hover { opacity: 0.9; }
+  .search-filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .search-filters label { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text2); }
+  .search-filters input[type="checkbox"] { accent-color: var(--accent); }
+  .search-filters input[type="date"] { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 4px 8px; font-size: 13px; }
+
+  /* Cards */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .card-title { font-weight: 600; font-size: 15px; }
+  .card-meta { font-size: 12px; color: var(--text2); }
+
+  /* Stats grid */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+  .stat-value { font-size: 28px; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+
+  /* Record list */
+  .record { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+  .record:hover { background: rgba(88,166,255,0.05); }
+  .record:last-child { border-bottom: none; }
+  .record-id { font-family: monospace; font-size: 13px; color: var(--accent); }
+  .record-time { font-size: 12px; color: var(--text2); margin-left: 8px; }
+  .record-action { font-size: 13px; margin-top: 4px; }
+  .record-preview { font-size: 12px; color: var(--text2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 800px; }
+  .error-badge { background: rgba(248,81,73,0.15); color: var(--red); padding: 1px 6px; border-radius: 3px; font-size: 11px; }
+  .ok-badge { color: var(--green); font-size: 12px; }
+
+  /* Timeline chart */
+  .timeline-chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; margin: 16px 0; }
+  .timeline-bar { flex: 1; min-width: 8px; background: var(--accent); border-radius: 2px 2px 0 0; position: relative; cursor: pointer; transition: opacity 0.1s; }
+  .timeline-bar:hover { opacity: 0.8; }
+  .timeline-bar .error-part { position: absolute; bottom: 0; left: 0; right: 0; background: var(--red); border-radius: 0 0 2px 2px; }
+  .timeline-labels { display: flex; gap: 2px; margin-top: 4px; }
+  .timeline-labels span { flex: 1; min-width: 8px; text-align: center; font-size: 9px; color: var(--text2); overflow: hidden; }
+
+  /* Trace chain */
+  .trace-step { display: flex; gap: 12px; padding: 10px 0; border-left: 2px solid var(--border); margin-left: 12px; padding-left: 16px; }
+  .trace-step:first-child { border-left-color: var(--accent); }
+  .trace-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); margin-top: 5px; flex-shrink: 0; margin-left: -22px; }
+  .trace-step:first-child .trace-dot { background: var(--accent); }
+
+  /* Audit */
+  .health-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+  .health-healthy { background: rgba(63,185,80,0.15); color: var(--green); }
+  .health-warning { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .health-degraded { background: rgba(248,81,73,0.15); color: var(--red); }
+  .anomaly { padding: 12px; border-left: 3px solid var(--yellow); margin: 8px 0; background: rgba(210,153,34,0.05); border-radius: 0 6px 6px 0; }
+  .anomaly.high { border-left-color: var(--red); background: rgba(248,81,73,0.05); }
+
+  /* Sections */
+  .section { display: none; }
+  .section.active { display: block; }
+
+  /* Loading */
+  .loading { text-align: center; padding: 40px; color: var(--text2); }
+  .empty { text-align: center; padding: 40px; color: var(--text2); }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>📊 <span>ATLAST</span> ECP Dashboard</h1>
+    <span class="badge" id="agent-did">loading...</span>
+    <span class="badge" id="record-count">-</span>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="search">🔍 Search</div>
+    <div class="tab" data-tab="timeline">📅 Timeline</div>
+    <div class="tab" data-tab="audit">📋 Audit</div>
+    <div class="tab" data-tab="trace">🔗 Trace</div>
+  </div>
+
+  <!-- Search -->
+  <div class="section active" id="sec-search">
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Search records... (action, model, content, session)" autofocus>
+      <button onclick="doSearch()">Search</button>
+    </div>
+    <div class="search-filters">
+      <label><input type="checkbox" id="errors-only"> Errors only</label>
+      <label>Since: <input type="date" id="since-date"></label>
+      <label>Until: <input type="date" id="until-date"></label>
+    </div>
+    <div id="search-results"><div class="empty">Enter a search query or press Search to show all records</div></div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="section" id="sec-timeline">
+    <div class="search-bar">
+      <select id="timeline-days" style="padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+        <option value="7">Last 7 days</option>
+        <option value="14">Last 14 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="60">Last 60 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button onclick="loadTimeline()">Refresh</button>
+    </div>
+    <div id="timeline-content"><div class="loading">Loading timeline...</div></div>
+  </div>
+
+  <!-- Audit -->
+  <div class="section" id="sec-audit">
+    <div class="search-bar">
+      <select id="audit-days" style="padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="60">Last 60 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button onclick="loadAudit()">Run Audit</button>
+    </div>
+    <div id="audit-content"><div class="loading">Click "Run Audit" to generate report</div></div>
+  </div>
+
+  <!-- Trace -->
+  <div class="section" id="sec-trace">
+    <div class="search-bar">
+      <input type="text" id="trace-input" placeholder="Enter record ID (e.g., rec_abc123)">
+      <button onclick="doTrace()">Trace Back</button>
+      <button onclick="doTrace('forward')" style="background:var(--surface);color:var(--text);border:1px solid var(--border);">Trace Forward</button>
+    </div>
+    <div id="trace-results"><div class="empty">Enter a record ID to trace its evidence chain</div></div>
+  </div>
+</div>
+
+<script>
+const API = '';
+
+// Tabs
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('sec-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'timeline') loadTimeline();
+  });
+});
+
+// Search
+document.getElementById('search-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+async function doSearch() {
+  const q = document.getElementById('search-input').value;
+  const errors = document.getElementById('errors-only').checked ? '1' : '';
+  const since = document.getElementById('since-date').value;
+  const until = document.getElementById('until-date').value;
+  const params = new URLSearchParams({q, limit: '50'});
+  if (errors) params.set('errors', '1');
+  if (since) params.set('since', since);
+  if (until) params.set('until', until);
+
+  const el = document.getElementById('search-results');
+  el.innerHTML = '<div class="loading">Searching...</div>';
+
+  const resp = await fetch(API + '/api/search?' + params);
+  const data = await resp.json();
+  renderSearchResults(data.results || [], q);
+}
+
+function renderSearchResults(results, query) {
+  const el = document.getElementById('search-results');
+  if (!results.length) { el.innerHTML = `<div class="empty">No results for "${query}"</div>`; return; }
+
+  el.innerHTML = `<div class="card"><div class="card-header"><span class="card-title">Found ${results.length} record(s)</span></div>` +
+    results.map(r => {
+      const ts = r.ts ? new Date(r.ts).toLocaleString() : '?';
+      const errBadge = r.error ? '<span class="error-badge">ERROR</span>' : '<span class="ok-badge">✓</span>';
+      const conf = r.confidence != null ? ` conf=${Number(r.confidence).toFixed(2)}` : '';
+      return `<div class="record" onclick="traceRecord('${r.id}')">
+        <div><span class="record-id">${r.id}</span><span class="record-time">${ts}</span> ${errBadge}</div>
+        <div class="record-action">[${r.step_type || '?'}] ${r.action || ''}${conf}</div>
+        ${r.input_preview ? `<div class="record-preview">→ ${esc(r.input_preview.substring(0, 120))}</div>` : ''}
+        ${r.session_id ? `<div class="record-preview">session: ${r.session_id}</div>` : ''}
+      </div>`;
+    }).join('') + '</div>';
+}
+
+// Timeline
+async function loadTimeline() {
+  const days = document.getElementById('timeline-days').value;
+  const el = document.getElementById('timeline-content');
+  el.innerHTML = '<div class="loading">Loading...</div>';
+
+  const resp = await fetch(API + `/api/timeline?days=${days}`);
+  const data = await resp.json();
+  renderTimeline(data.timeline || []);
+}
+
+function renderTimeline(tl) {
+  const el = document.getElementById('timeline-content');
+  if (!tl.length) { el.innerHTML = '<div class="empty">No activity in this period</div>'; return; }
+
+  const maxTotal = Math.max(...tl.map(d => d.total));
+  const totalRecords = tl.reduce((s, d) => s + d.total, 0);
+  const totalErrors = tl.reduce((s, d) => s + d.errors, 0);
+
+  let html = `<div class="stats-grid">
+    <div class="stat-card"><div class="stat-value">${totalRecords.toLocaleString()}</div><div class="stat-label">Total Records</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:${totalErrors > 0 ? 'var(--red)' : 'var(--green)'}">${totalErrors}</div><div class="stat-label">Errors</div></div>
+    <div class="stat-card"><div class="stat-value">${tl.length}</div><div class="stat-label">Active Days</div></div>
+    <div class="stat-card"><div class="stat-value">${Math.round(tl.reduce((s,d) => s + d.avg_latency_ms, 0) / tl.length)}</div><div class="stat-label">Avg Latency (ms)</div></div>
+  </div>`;
+
+  html += '<div class="card"><div class="card-title" style="margin-bottom:12px">Daily Activity</div><div class="timeline-chart">';
+  tl.forEach(d => {
+    const h = Math.max(4, (d.total / maxTotal) * 100);
+    const errH = d.total > 0 ? (d.errors / d.total) * h : 0;
+    html += `<div class="timeline-bar" style="height:${h}%" title="${d.date}: ${d.total} records, ${d.errors} errors">
+      ${errH > 0 ? `<div class="error-part" style="height:${errH}%"></div>` : ''}
+    </div>`;
+  });
+  html += '</div><div class="timeline-labels">';
+  tl.forEach((d, i) => { html += `<span>${i % Math.ceil(tl.length/10) === 0 ? d.date.slice(5) : ''}</span>`; });
+  html += '</div></div>';
+
+  // Table
+  html += '<div class="card" style="overflow-x:auto;"><table style="width:100%;font-size:13px;border-collapse:collapse;">';
+  html += '<tr style="color:var(--text2);text-align:left;"><th style="padding:8px">Date</th><th>Records</th><th>Errors</th><th>Error%</th><th>Avg Latency</th><th>Sessions</th></tr>';
+  tl.forEach(d => {
+    const errColor = d.error_rate > 20 ? 'var(--red)' : d.error_rate > 5 ? 'var(--yellow)' : 'var(--text)';
+    html += `<tr style="border-top:1px solid var(--border)"><td style="padding:8px">${d.date}</td><td>${d.total}</td><td>${d.errors}</td><td style="color:${errColor}">${d.error_rate}%</td><td>${d.avg_latency_ms}ms</td><td>${d.sessions}</td></tr>`;
+  });
+  html += '</table></div>';
+  el.innerHTML = html;
+}
+
+// Audit
+async function loadAudit() {
+  const days = document.getElementById('audit-days').value;
+  const el = document.getElementById('audit-content');
+  el.innerHTML = '<div class="loading">Running audit...</div>';
+
+  const resp = await fetch(API + `/api/audit?days=${days}`);
+  const report = await resp.json();
+  renderAudit(report);
+}
+
+function renderAudit(r) {
+  const el = document.getElementById('audit-content');
+  if (r.status === 'no_data') { el.innerHTML = '<div class="empty">No records found in this period</div>'; return; }
+
+  const s = r.summary;
+  const healthClass = 'health-' + r.health;
+  let html = `<div class="card">
+    <div class="card-header"><span class="card-title">Audit Report</span><span class="health-badge ${healthClass}">${r.health.toUpperCase()}</span></div>
+    <div class="stats-grid" style="margin-top:12px">
+      <div class="stat-card"><div class="stat-value">${s.total_records.toLocaleString()}</div><div class="stat-label">Records</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:${s.total_errors>0?'var(--red)':'var(--green)'}">${s.total_errors}</div><div class="stat-label">Errors (${s.error_rate_pct}%)</div></div>
+      <div class="stat-card"><div class="stat-value">${s.sessions}</div><div class="stat-label">Sessions</div></div>
+      <div class="stat-card"><div class="stat-value">${s.avg_latency_ms}</div><div class="stat-label">Avg Latency (ms)</div></div>
+    </div></div>`;
+
+  if (r.anomalies && r.anomalies.length > 0) {
+    html += '<div class="card"><div class="card-title" style="margin-bottom:12px">⚠️ Anomalies Detected</div>';
+    r.anomalies.forEach(a => {
+      html += `<div class="anomaly ${a.severity}">
+        <strong>[${a.date}] ${a.type}</strong>: ${a.detail}
+        ${a.first_error_id ? `<br><a href="#" onclick="traceRecord('${a.first_error_id}');return false;" style="color:var(--accent)">Trace: ${a.first_error_id}</a>` : ''}
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  if (r.root_causes && r.root_causes.length > 0) {
+    html += '<div class="card"><div class="card-title" style="margin-bottom:12px">🔍 Root Cause Candidates</div>';
+    r.root_causes.forEach(rc => {
+      html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <strong>[${rc.date}]</strong> ${rc.anomaly} — chain depth ${rc.chain_depth}<br>
+        <span style="font-family:monospace;font-size:12px;color:var(--text2)">${rc.chain_ids.join(' → ')}</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  if (!r.anomalies || r.anomalies.length === 0) {
+    html += '<div class="card" style="text-align:center;padding:24px;">✅ No anomalies detected. Agent behavior is consistent.</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+// Trace
+document.getElementById('trace-input').addEventListener('keydown', e => { if (e.key === 'Enter') doTrace(); });
+
+async function doTrace(dir = 'back') {
+  const id = document.getElementById('trace-input').value.trim();
+  if (!id) return;
+  const el = document.getElementById('trace-results');
+  el.innerHTML = '<div class="loading">Tracing chain...</div>';
+
+  const resp = await fetch(API + `/api/trace?id=${id}&dir=${dir}`);
+  const data = await resp.json();
+  renderTrace(data.chain || [], id, dir);
+}
+
+function traceRecord(id) {
+  document.getElementById('trace-input').value = id;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelector('[data-tab="trace"]').classList.add('active');
+  document.getElementById('sec-trace').classList.add('active');
+  doTrace();
+}
+
+function renderTrace(chain, startId, dir) {
+  const el = document.getElementById('trace-results');
+  if (!chain.length) { el.innerHTML = `<div class="empty">No chain found from ${startId}</div>`; return; }
+
+  const label = dir === 'back' ? '← Root Cause Trace' : '→ Impact Trace';
+  let html = `<div class="card"><div class="card-header"><span class="card-title">${label}</span><span class="card-meta">${chain.length} steps</span></div>`;
+  chain.forEach((entry, i) => {
+    const r = entry.record || entry;
+    const ts = (r.ts || entry.ts) ? new Date(r.ts || entry.ts).toLocaleString() : '?';
+    const action = (r.step ? r.step.action : entry.action) || '';
+    const stepType = (r.step ? r.step.type : entry.step_type) || '';
+    const err = entry.error || (r.step && r.step.flags && r.step.flags.includes('error'));
+    const dotColor = i === 0 ? 'var(--accent)' : (err ? 'var(--red)' : 'var(--border)');
+
+    html += `<div class="trace-step">
+      <div class="trace-dot" style="background:${dotColor}"></div>
+      <div>
+        <span class="record-id">${r.id || entry.id}</span><span class="record-time">${ts}</span>
+        ${err ? '<span class="error-badge">ERROR</span>' : ''}
+        <div class="record-action">[${stepType}] ${action}</div>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// Init
+(async () => {
+  try {
+    const resp = await fetch(API + '/api/stats');
+    const stats = await resp.json();
+    document.getElementById('agent-did').textContent = stats.agent_did || 'unknown';
+    document.getElementById('record-count').textContent = `${stats.total_records || 0} records`;
+  } catch(e) { console.error('Stats load failed:', e); }
+
+  // Auto-rebuild index
+  try { await fetch(API + '/api/index'); } catch(e) {}
+})();
+</script>
+</body>
+</html>

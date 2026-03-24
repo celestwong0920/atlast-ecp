@@ -165,6 +165,68 @@ def _get_tools() -> list[dict]:
                 "required": []
             }
         },
+        {
+            "name": "ecp_search",
+            "description": (
+                "Search ECP records by keyword. Searches across actions, models, "
+                "input/output content, sessions, and flags. Returns matching records."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "limit": {"type": "integer", "description": "Max results (default 20)"},
+                    "errors_only": {"type": "boolean", "description": "Only return error records"},
+                    "since": {"type": "string", "description": "Start date YYYY-MM-DD"},
+                    "until": {"type": "string", "description": "End date YYYY-MM-DD"},
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "ecp_trace",
+            "description": (
+                "Trace the evidence chain from a record. Follow chain links backwards "
+                "for root cause analysis, or forwards for impact analysis."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string", "description": "Record ID to trace from"},
+                    "direction": {"type": "string", "enum": ["back", "forward"], "description": "Trace direction (default: back)"},
+                },
+                "required": ["record_id"]
+            }
+        },
+        {
+            "name": "ecp_audit",
+            "description": (
+                "Run an automated audit report. Analyzes record history for anomalies: "
+                "error spikes, confidence drops, latency issues. Returns health status, "
+                "anomaly details, and root cause candidates."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Analysis period in days (default 30)"},
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "ecp_timeline",
+            "description": (
+                "Get daily activity timeline with record counts, error rates, "
+                "latency trends, and session counts."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Number of days (default 7)"},
+                },
+                "required": []
+            }
+        },
     ]
 
 
@@ -395,6 +457,47 @@ def _tool_ecp_stats() -> dict:
         return {"error": str(e)}
 
 
+def _tool_ecp_search(query: str = "", limit: int = 20, errors_only: bool = False,
+                      since: str = None, until: str = None) -> dict:
+    """Search ECP records."""
+    try:
+        from .query import search
+        results = search(query, limit=limit, errors_only=errors_only,
+                         since=since, until=until, as_json=True)
+        return {"count": len(results), "results": results}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_ecp_trace(record_id: str, direction: str = "back") -> dict:
+    """Trace evidence chain."""
+    try:
+        from .query import trace
+        chain = trace(record_id, direction=direction, as_json=True)
+        return {"record_id": record_id, "direction": direction, "depth": len(chain), "chain": chain}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_ecp_audit(days: int = 30) -> dict:
+    """Run automated audit."""
+    try:
+        from .query import audit
+        return audit(days=days, as_json=True)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_ecp_timeline(days: int = 7) -> dict:
+    """Get activity timeline."""
+    try:
+        from .query import timeline
+        results = timeline(days=days, as_json=True)
+        return {"days": days, "timeline": results}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _handle_tool_call(tool_name: str, tool_input: dict) -> Any:
     if tool_name == "ecp_verify":
         return _tool_ecp_verify(tool_input.get("record_id", ""))
@@ -418,6 +521,14 @@ def _handle_tool_call(tool_name: str, tool_input: dict) -> Any:
         return _tool_ecp_flush()
     elif tool_name == "ecp_stats":
         return _tool_ecp_stats()
+    elif tool_name == "ecp_search":
+        return _tool_ecp_search(**tool_input)
+    elif tool_name == "ecp_trace":
+        return _tool_ecp_trace(**tool_input)
+    elif tool_name == "ecp_audit":
+        return _tool_ecp_audit(**tool_input)
+    elif tool_name == "ecp_timeline":
+        return _tool_ecp_timeline(**tool_input)
     else:
         return {"error": f"Unknown tool: {tool_name}"}
 

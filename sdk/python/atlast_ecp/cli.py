@@ -1358,6 +1358,23 @@ def cmd_index(args: list[str]):
     print(f"✅ Index built: {count} records")
 
 
+def cmd_dashboard(args: list[str]):
+    """atlast dashboard [--port 3827] [--no-open] — launch local web dashboard"""
+    port = 3827
+    open_browser = True
+    i = 0
+    while i < len(args):
+        if args[i] == "--port" and i + 1 < len(args):
+            port = int(args[i + 1]); i += 2
+        elif args[i] == "--no-open":
+            open_browser = False; i += 1
+        else:
+            i += 1
+
+    from .dashboard_server import start_dashboard
+    start_dashboard(port=port, open_browser=open_browser)
+
+
 def main():
     args = sys.argv[1:]
     if not args:
@@ -1377,6 +1394,7 @@ def main():
         print("    atlast audit [--days N]  Automated audit report")
         print("    atlast timeline          Daily activity timeline")
         print("    atlast index             Rebuild search index")
+        print("    atlast dashboard         Open local web dashboard")
         print()
         print("  Analysis:")
         print("    atlast insights          Analyze records (latency, errors, models)")
@@ -1450,6 +1468,7 @@ def main():
         "audit": cmd_audit,
         "timeline": cmd_timeline,
         "index": cmd_index,
+        "dashboard": cmd_dashboard,
     }
     commands.update(query_commands)
 
