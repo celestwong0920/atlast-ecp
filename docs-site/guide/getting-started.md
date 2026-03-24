@@ -90,6 +90,47 @@ atlast push
 
 This uploads Merkle roots to `api.weba0.com` for on-chain anchoring.
 
+## Super-Batch Aggregation
+
+When 5+ batches are pending, the server automatically aggregates them into a **single on-chain attestation** via a Super Merkle Tree — reducing gas costs by up to 1000×.
+
+Each batch gets an **inclusion proof** that independently verifies it belongs to the on-chain attestation, without requiring the other batches.
+
+```
+┌─────────────────────────────────────┐
+│         Super Merkle Root           │ ← 1 EAS attestation
+│      ┌────────┴────────┐            │
+│   Hash(A+B)       Hash(C+D)        │
+│   ┌──┴──┐        ┌──┴──┐           │
+│ Root_A Root_B  Root_C Root_D        │ ← Individual batch roots
+└─────────────────────────────────────┘
+```
+
+You don't need to do anything — super-batching is automatic. Your batch's `inclusion_proof` is included in the webhook payload for independent verification.
+
+Query a super-batch:
+```bash
+curl https://api.weba0.com/v1/super-batches/{super_batch_id}
+```
+
+## Behavioral Drift Detection
+
+The server monitors your agent's behavior patterns over time. If record counts, latency, or other metrics shift significantly, drift is detected:
+
+```bash
+curl https://api.weba0.com/v1/agents/{did}/drift
+```
+
+Returns:
+```json
+{
+  "drift_score": 0.12,
+  "drift_detected": false,
+  "baseline_window": 20,
+  "current_window": 5
+}
+```
+
 ## Next Steps
 
 - [Core Concepts](/guide/concepts) — understand ECP data model
