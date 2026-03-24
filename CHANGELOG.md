@@ -2,6 +2,20 @@
 
 All notable changes to the ATLAST ECP SDK and Server.
 
+## [0.10.0-post] — 2026-03-25 (Post-release Fixes)
+
+### Fixed
+- **CI: Smoke test discovery** — use `.eas.schema_uid` path to match actual JSON structure
+- **CI: Smoke test health** — accept `ok` status from production health endpoint
+- **CI: Server tests** — add `aiosqlite` to server requirements, fixes 17 test errors
+
+### Published
+- **npm**: `atlast-ecp-ts@0.3.0` published to registry
+- **GitHub Release v0.10.0**: updated with PyPI + npm package links
+
+### Upgraded
+- Local dev: `pip install atlast-ecp` → 0.10.0 (was 0.8.1)
+
 ## [0.10.0] — 2026-03-25 (Full Feature Release)
 
 ### Added
