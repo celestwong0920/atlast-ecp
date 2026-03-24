@@ -8,6 +8,7 @@ ECP Server stores attestation records in Postgres for:
 """
 
 import structlog
+import sqlalchemy
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, Index, TIMESTAMP
@@ -89,7 +90,28 @@ async def init_db():
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # Run lightweight schema migrations (idempotent ALTER statements)
+    await _run_migrations()
+
     logger.info("db_initialized", tables=["attestations", "anchor_logs", "agents", "api_keys", "batches"])
+
+
+async def _run_migrations():
+    """Idempotent schema migrations — safe to run on every startup."""
+    if _engine is None:
+        return
+    migrations = [
+        # v0.9.0: Fix DateTime → TIMESTAMPTZ for asyncpg tz-aware compat
+        "ALTER TABLE attestations ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC'",
+        "ALTER TABLE attestations ALTER COLUMN anchored_at TYPE TIMESTAMPTZ USING anchored_at AT TIME ZONE 'UTC'",
+        "ALTER TABLE anchor_logs ALTER COLUMN run_at TYPE TIMESTAMPTZ USING run_at AT TIME ZONE 'UTC'",
+    ]
+    async with _engine.begin() as conn:
+        for sql in migrations:
+            try:
+                await conn.execute(sqlalchemy.text(sql))
+            except Exception:
+                pass  # Column already correct type — ignore
 
 
 async def get_session() -> AsyncSession | None:
