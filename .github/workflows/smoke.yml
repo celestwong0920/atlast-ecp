@@ -19,7 +19,7 @@ jobs:
 
       - name: Discovery endpoint
         run: |
-          SCHEMA=$(curl -sf https://api.weba0.com/.well-known/ecp.json | jq -r '.schema_uid')
+          SCHEMA=$(curl -sf https://api.weba0.com/.well-known/ecp.json | jq -r '.eas.schema_uid // .schema_uid')
           EXPECTED="0xa67da7e880b3fe643f0e12b754c6048fc0a0bad0ed9a932ac85a5ebf6bd9326e"
           echo "Schema UID: $SCHEMA"
           [ "$SCHEMA" = "$EXPECTED" ] || { echo "❌ Schema UID mismatch"; exit 1; }
