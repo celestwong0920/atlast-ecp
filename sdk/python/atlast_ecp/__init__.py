@@ -72,3 +72,6 @@ __all__ = [
     "load_config",
     "save_config",
 ]
+
+# Query & Audit
+from .query import search, trace, audit, timeline, rebuild_index

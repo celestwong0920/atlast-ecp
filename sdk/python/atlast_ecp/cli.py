@@ -1227,6 +1227,137 @@ def _cmd_discover(args: list[str]):
     print()
 
 
+# ── Query & Audit Commands ────────────────────────────────────────────────────
+
+
+def cmd_search(args: list[str]):
+    """atlast search <query> [--agent DID] [--since DATE] [--until DATE] [--errors] [--json] [--limit N]"""
+    import json as _json
+    if not args:
+        print("Usage: atlast search <query> [--agent DID] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--errors] [--json]")
+        return
+
+    query = []
+    agent = None
+    since = None
+    until = None
+    errors_only = False
+    as_json = False
+    limit = 20
+    i = 0
+    while i < len(args):
+        if args[i] == "--agent" and i + 1 < len(args):
+            agent = args[i + 1]; i += 2
+        elif args[i] == "--since" and i + 1 < len(args):
+            since = args[i + 1]; i += 2
+        elif args[i] == "--until" and i + 1 < len(args):
+            until = args[i + 1]; i += 2
+        elif args[i] == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1]); i += 2
+        elif args[i] == "--errors":
+            errors_only = True; i += 1
+        elif args[i] == "--json":
+            as_json = True; i += 1
+        else:
+            query.append(args[i]); i += 1
+
+    from .query import search
+    results = search(" ".join(query), limit=limit, agent=agent, since=since, until=until, errors_only=errors_only, as_json=as_json)
+    if as_json:
+        print(_json.dumps(results, indent=2, default=str))
+
+
+def cmd_trace(args: list[str]):
+    """atlast trace <record_id> [--forward] [--limit N] [--json]"""
+    import json as _json
+    if not args:
+        print("Usage: atlast trace <record_id> [--forward] [--limit N] [--json]")
+        return
+
+    record_id = args[0]
+    direction = "back"
+    limit = 50
+    as_json = False
+    for i, a in enumerate(args[1:], 1):
+        if a == "--forward":
+            direction = "forward"
+        elif a == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1])
+        elif a == "--json":
+            as_json = True
+
+    from .query import trace
+    chain = trace(record_id, direction=direction, limit=limit, as_json=as_json)
+    if as_json:
+        print(_json.dumps(chain, indent=2, default=str))
+
+
+def cmd_audit(args: list[str]):
+    """atlast audit [--days N] [--agent DID] [--json]"""
+    import json as _json
+    days = 30
+    agent = None
+    as_json = False
+    i = 0
+    while i < len(args):
+        if args[i] == "--days" and i + 1 < len(args):
+            days = int(args[i + 1]); i += 2
+        elif args[i] == "--agent" and i + 1 < len(args):
+            agent = args[i + 1]; i += 2
+        elif args[i] == "--json":
+            as_json = True; i += 1
+        elif args[i] == "--last" and i + 1 < len(args):
+            # --last 60d format
+            val = args[i + 1]
+            if val.endswith("d"):
+                days = int(val[:-1])
+            i += 2
+        else:
+            i += 1
+
+    from .query import audit
+    report = audit(days=days, agent=agent, as_json=as_json)
+    if as_json:
+        print(_json.dumps(report, indent=2, default=str))
+
+
+def cmd_timeline(args: list[str]):
+    """atlast timeline [--days N] [--since DATE] [--until DATE] [--agent DID] [--json]"""
+    import json as _json
+    days = 7
+    since = None
+    until = None
+    agent = None
+    as_json = False
+    i = 0
+    while i < len(args):
+        if args[i] == "--days" and i + 1 < len(args):
+            days = int(args[i + 1]); i += 2
+        elif args[i] == "--since" and i + 1 < len(args):
+            since = args[i + 1]; i += 2
+        elif args[i] == "--until" and i + 1 < len(args):
+            until = args[i + 1]; i += 2
+        elif args[i] == "--agent" and i + 1 < len(args):
+            agent = args[i + 1]; i += 2
+        elif args[i] == "--json":
+            as_json = True; i += 1
+        else:
+            i += 1
+
+    from .query import timeline
+    results = timeline(days=days, since=since, until=until, agent=agent, as_json=as_json)
+    if as_json:
+        print(_json.dumps(results, indent=2, default=str))
+
+
+def cmd_index(args: list[str]):
+    """atlast index — rebuild search index"""
+    from .query import rebuild_index
+    print("🔄 Rebuilding search index...")
+    count = rebuild_index(verbose=True)
+    print(f"✅ Index built: {count} records")
+
+
 def main():
     args = sys.argv[1:]
     if not args:
@@ -1239,6 +1370,13 @@ def main():
         print("  Zero-code integration:")
         print("    atlast proxy             Start local transparent proxy")
         print("    atlast run <cmd>         Run command with proxy auto-injected")
+        print()
+        print("  Query & Audit:")
+        print("    atlast search <query>    Search records (full-text)")
+        print("    atlast trace <id>        Trace evidence chain (root cause)")
+        print("    atlast audit [--days N]  Automated audit report")
+        print("    atlast timeline          Daily activity timeline")
+        print("    atlast index             Rebuild search index")
         print()
         print("  Analysis:")
         print("    atlast insights          Analyze records (latency, errors, models)")
@@ -1304,6 +1442,16 @@ def main():
     if cmd in ("--version", "-V"):
         print(f"atlast-ecp {__version__}")
         return
+
+    # Query & Audit commands (dynamic import to avoid circular)
+    query_commands = {
+        "search": cmd_search,
+        "trace": cmd_trace,
+        "audit": cmd_audit,
+        "timeline": cmd_timeline,
+        "index": cmd_index,
+    }
+    commands.update(query_commands)
 
     if cmd in commands:
         commands[cmd](rest)

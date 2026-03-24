@@ -21,6 +21,38 @@ from .auth import verify_api_key
 logger = structlog.get_logger()
 router = APIRouter()
 
+# ── Per-Agent Rate Limiter ──────────────────────────────────────────────────
+# Lightweight in-memory rate limit per agent DID.
+# Limits: free=10/min, pro=60/min, enterprise=300/min
+
+import time as _time
+import threading as _threading
+
+_agent_rate_lock = _threading.Lock()
+_agent_rate_buckets: dict[str, list[float]] = {}
+_RATE_LIMITS = {"free": 10, "pro": 60, "enterprise": 300}
+
+
+def _check_agent_rate(agent_did: str, tier: str = "free") -> bool:
+    """Returns True if request is allowed, False if rate limited."""
+    limit = _RATE_LIMITS.get(tier, 10)
+    now = _time.time()
+    window = 60.0  # 1 minute
+
+    with _agent_rate_lock:
+        if agent_did not in _agent_rate_buckets:
+            _agent_rate_buckets[agent_did] = []
+
+        # Prune old entries
+        bucket = _agent_rate_buckets[agent_did]
+        _agent_rate_buckets[agent_did] = [t for t in bucket if now - t < window]
+
+        if len(_agent_rate_buckets[agent_did]) >= limit:
+            return False
+
+        _agent_rate_buckets[agent_did].append(now)
+        return True
+
 
 class BatchUploadRequest(BaseModel):
     merkle_root: str
@@ -56,9 +88,10 @@ async def upload_batch(
     # Accept either header name (X-API-Key is new standard, X-Agent-Key is legacy)
     api_key = x_api_key or x_agent_key
 
+    rate_tier = "free"
     if api_key:
         try:
-            agent_did, _ = await verify_api_key(api_key)
+            agent_did, rate_tier = await verify_api_key(api_key)
             # Verify the DID matches the key's agent
             if agent_did != req.agent_did:
                 raise HTTPException(
@@ -79,6 +112,15 @@ async def upload_batch(
             )
         # Non-production: accept without auth for local development
         logger.warning("batch_upload_no_api_key_dev", did=req.agent_did)
+
+    # Per-agent rate limit
+    if not _check_agent_rate(req.agent_did, rate_tier):
+        limit = _RATE_LIMITS.get(rate_tier, 10)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded: {limit} requests/min for {rate_tier} tier",
+            headers={"Retry-After": "60"},
+        )
 
     # Generate batch_id
     batch_id = f"batch_{secrets.token_hex(8)}"
