@@ -189,14 +189,14 @@ def search(
     params = []
 
     if query:
-        # Search across multiple fields
+        # Search across multiple fields including date
         conditions.append("""
             (action LIKE ? OR model LIKE ? OR input_preview LIKE ?
              OR output_preview LIKE ? OR flags LIKE ? OR session_id LIKE ?
-             OR step_type LIKE ? OR id LIKE ?)
+             OR step_type LIKE ? OR id LIKE ? OR date LIKE ? OR agent LIKE ?)
         """)
         like = f"%{query}%"
-        params.extend([like] * 8)
+        params.extend([like] * 10)
 
     if agent:
         conditions.append("agent = ?")

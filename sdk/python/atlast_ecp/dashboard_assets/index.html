@@ -476,9 +476,23 @@ function jumpToTrace(recordId) {
 }
 
 function jumpToSearch(date) {
-  showTab('search');
-  document.getElementById('search-input').value = date;
-  doSearch();
+  showTab('activity');
+  // Reset filters and load that date's records
+  document.getElementById('activity-agent').value = '';
+  document.getElementById('activity-filter').value = '';
+  loadActivityByDate(date);
+}
+
+async function loadActivityByDate(date) {
+  activityLoaded = true;
+  const el = document.getElementById('activity-list');
+  el.innerHTML = `<div style="margin-bottom:12px; font-size:14px; font-weight:600">📅 Records from ${date}</div><div class="loading">Loading...</div>`;
+  const data = await api(`/api/search?q=${encodeURIComponent(date)}&limit=50`);
+  const container = document.createElement('div');
+  container.id = 'activity-date-results';
+  el.innerHTML = `<div style="margin-bottom:12px; font-size:14px; font-weight:600">📅 Records from ${date} — ${data.count} records</div>`;
+  el.appendChild(container);
+  renderRecords(data.results || [], 'activity-date-results');
 }
 
 // ── Agent list ──
