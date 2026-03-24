@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"path/filepath"
 )
 
 // DefaultPath returns the default ECP records path.
@@ -15,6 +16,9 @@ func DefaultPath() string {
 // SaveRecord appends a record to a JSONL file.
 // Creates parent directories if needed.
 func SaveRecord(path string, record Record) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err

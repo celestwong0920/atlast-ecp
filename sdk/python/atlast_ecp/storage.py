@@ -3,9 +3,11 @@ ECP Storage — local .ecp/ file management.
 Content NEVER leaves the device. Only hashes are transmitted.
 """
 
+import gzip
 import json
 import threading
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -30,20 +32,50 @@ def init_storage():
         INDEX_FILE.write_text(json.dumps({}))
 
 
+@contextmanager
+def _open_record_file(file_path: Path, mode: str = "r"):
+    """Open a record file transparently — plain or gzip."""
+    if file_path.suffix == ".gz":
+        with gzip.open(file_path, mode + "t", encoding="utf-8") as fh:
+            yield fh
+    else:
+        with open(file_path, mode, encoding="utf-8") as fh:
+            yield fh
+
+
+def _iter_record_files(date: Optional[str] = None):
+    """Yield record file paths (both .jsonl and .jsonl.gz), newest first."""
+    if date:
+        candidates = [
+            RECORDS_DIR / f"{date}.jsonl.gz",
+            RECORDS_DIR / f"{date}.jsonl",
+        ]
+        return [f for f in candidates if f.exists()]
+    all_files = list(RECORDS_DIR.glob("*.jsonl")) + list(RECORDS_DIR.glob("*.jsonl.gz"))
+    return sorted(all_files, key=lambda f: f.name, reverse=True)
+
+
 def save_record(record_dict: dict, local_summary: Optional[str] = None) -> str:
     """
     Save an ECP record to local storage.
     local_summary is saved separately in LOCAL_DIR — never uploaded.
+    Respects ECP_STORAGE_COMPRESS env var for gzip compression.
     Returns the record_id.
     """
     init_storage()
 
+    from .config import get_storage_compress
+    compress = get_storage_compress()
+
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    record_file = RECORDS_DIR / f"{today}.jsonl"
+    if compress:
+        record_file = RECORDS_DIR / f"{today}.jsonl.gz"
+    else:
+        record_file = RECORDS_DIR / f"{today}.jsonl"
 
     with _lock:
-        # Append record to daily JSONL file
-        with open(record_file, "a", encoding="utf-8") as f:
+        # Append record to daily file (plain or gzip)
+        with _open_record_file(record_file, "a") as f:
             f.write(json.dumps(record_dict, ensure_ascii=False) + "\n")
 
         # Update index
@@ -69,19 +101,17 @@ def load_records(
     agent_id: Optional[str] = None,
     ecp_dir: Optional[str] = None,
 ) -> list[dict]:
-    """Load ECP records from local storage (newest first)."""
+    """Load ECP records from local storage (newest first). Handles .jsonl and .jsonl.gz."""
     init_storage()
 
-    if date:
-        files = [RECORDS_DIR / f"{date}.jsonl"]
-    else:
-        files = sorted(RECORDS_DIR.glob("*.jsonl"), reverse=True)
+    files = _iter_record_files(date)
 
     records = []
     for f in files:
         if not f.exists():
             continue
-        lines = f.read_text(encoding="utf-8").strip().splitlines()
+        with _open_record_file(f) as fh:
+            lines = fh.read().strip().splitlines()
         for line in reversed(lines):
             if line.strip():
                 try:
@@ -101,7 +131,7 @@ def load_records(
 
 
 def load_record_by_id(record_id: str) -> Optional[dict]:
-    """Load a single record by ID."""
+    """Load a single record by ID. Handles .jsonl and .jsonl.gz transparently."""
     init_storage()
     index = _load_index()
 
@@ -112,14 +142,15 @@ def load_record_by_id(record_id: str) -> Optional[dict]:
     if not file_path.exists():
         return None
 
-    for line in file_path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            try:
-                r = json.loads(line)
-                if r.get("id") == record_id:
-                    return r
-            except json.JSONDecodeError:
-                continue
+    with _open_record_file(file_path) as fh:
+        for line in fh:
+            if line.strip():
+                try:
+                    r = json.loads(line)
+                    if r.get("id") == record_id:
+                        return r
+                except json.JSONDecodeError:
+                    continue
     return None
 
 
@@ -135,19 +166,27 @@ def load_local_summary(record_id: str) -> Optional[str]:
 
 def save_vault(record_id: str, input_content: str, output_content: str) -> None:
     """Save raw content to vault for local inspection. Never transmitted.
-    
+
+    Respects ECP_VAULT_MODE: full (default) | hash_only | compact.
     Also triggers encrypted backup if vault_backup_path is configured.
     """
     try:
         init_storage()
+        from .config import get_vault_mode
+        mode = get_vault_mode()
+
+        if mode == "hash_only":
+            return  # Skip vault save entirely
+
+        indent = 2 if mode == "full" else None
         content_json = json.dumps({
             "record_id": record_id,
             "input": input_content,
             "output": output_content,
-        }, ensure_ascii=False, indent=2)
+        }, ensure_ascii=False, indent=indent)
         vault_file = VAULT_DIR / f"{record_id}.json"
         vault_file.write_text(content_json, encoding="utf-8")
-        
+
         # Auto-backup if configured (Fail-Open)
         try:
             from .config import get_vault_backup_path
@@ -170,6 +209,8 @@ def save_vault_v2(record_id: str, input_content: str, output_content: str,
     """
     Save vault with v2 structure (Proxy path).
 
+    Respects ECP_VAULT_MODE: full (default) | hash_only | compact.
+
     Stores only NEW content per record. Audit metadata (full_request_hash,
     system_prompt, context_messages_count) enables complete reconstruction
     and verification of the original API call via chain traversal.
@@ -189,6 +230,12 @@ def save_vault_v2(record_id: str, input_content: str, output_content: str,
     """
     try:
         init_storage()
+        from .config import get_vault_mode
+        mode = get_vault_mode()
+
+        if mode == "hash_only":
+            return  # Skip vault save entirely
+
         vault_data = {
             "record_id": record_id,
             "input": input_content,
@@ -209,7 +256,8 @@ def save_vault_v2(record_id: str, input_content: str, output_content: str,
             if extra.get("session_id"):
                 vault_data["session_id"] = extra["session_id"]
 
-        content_json = json.dumps(vault_data, ensure_ascii=False, indent=2)
+        indent = 2 if mode == "full" else None
+        content_json = json.dumps(vault_data, ensure_ascii=False, indent=indent)
         vault_file = VAULT_DIR / f"{record_id}.json"
         vault_file.write_text(content_json, encoding="utf-8")
 
@@ -241,6 +289,68 @@ def load_vault(record_id: str) -> Optional[dict]:
         return None
 
 
+def cleanup_old_records(days: int = 90) -> dict:
+    """
+    Remove record files, vault files, and index entries older than `days` days.
+
+    Returns a dict with counts: removed_files, removed_vault, removed_index.
+    If days <= 0, does nothing (disabled).
+
+    Respects ECP_STORAGE_TTL_DAYS env var when called as CLI entrypoint.
+    """
+    if days <= 0:
+        return {"removed_files": 0, "removed_vault": 0, "removed_index": 0}
+
+    init_storage()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_date = cutoff.strftime("%Y-%m-%d")
+
+    removed_files = 0
+    removed_vault = 0
+    removed_index = 0
+
+    with _lock:
+        index = _load_index()
+
+        # Find and remove old record files; collect their paths
+        deleted_file_paths = set()
+        for pattern in ("*.jsonl", "*.jsonl.gz"):
+            for f in RECORDS_DIR.glob(pattern):
+                name = f.name
+                for ext in (".jsonl.gz", ".jsonl"):
+                    if name.endswith(ext):
+                        date_str = name[: -len(ext)]
+                        break
+                else:
+                    continue
+                if date_str < cutoff_date:
+                    deleted_file_paths.add(str(f))
+                    f.unlink()
+                    removed_files += 1
+
+        # Clean index: remove entries whose file was deleted or whose date is old
+        new_index = {}
+        for rid, meta in index.items():
+            file_path = meta.get("file", "")
+            date_str = meta.get("date", "")
+            if file_path in deleted_file_paths or date_str < cutoff_date:
+                removed_index += 1
+                vault_file = VAULT_DIR / f"{rid}.json"
+                if vault_file.exists():
+                    vault_file.unlink()
+                    removed_vault += 1
+            else:
+                new_index[rid] = meta
+
+        INDEX_FILE.write_text(json.dumps(new_index, indent=2))
+
+    return {
+        "removed_files": removed_files,
+        "removed_vault": removed_vault,
+        "removed_index": removed_index,
+    }
+
+
 def enqueue_for_upload(batch: dict):
     """Queue a Merkle batch for upload (used if upload fails)."""
     init_storage()
@@ -270,12 +380,14 @@ def clear_upload_queue():
 
 
 def count_records(date: Optional[str] = None) -> int:
-    """Count total ECP records."""
+    """Count total ECP records (both .jsonl and .jsonl.gz)."""
     init_storage()
     total = 0
-    pattern = f"{date}.jsonl" if date else "*.jsonl"
-    for f in RECORDS_DIR.glob(pattern):
-        total += sum(1 for line in f.read_text().splitlines() if line.strip())
+    patterns = [f"{date}.jsonl", f"{date}.jsonl.gz"] if date else ["*.jsonl", "*.jsonl.gz"]
+    for pattern in patterns:
+        for f in RECORDS_DIR.glob(pattern):
+            with _open_record_file(f) as fh:
+                total += sum(1 for line in fh if line.strip())
     return total
 
 
@@ -286,3 +398,26 @@ def _load_index() -> dict:
         return json.loads(INDEX_FILE.read_text())
     except (json.JSONDecodeError, IOError):
         return {}
+
+
+if __name__ == "__main__":
+    """CLI entrypoint: python -m atlast_ecp.storage [--days N]"""
+    import argparse
+    from .config import get_storage_ttl_days
+
+    parser = argparse.ArgumentParser(description="ECP Storage cleanup utility")
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Remove records older than N days (0=disabled). Defaults to ECP_STORAGE_TTL_DAYS.",
+    )
+    args = parser.parse_args()
+
+    days = args.days if args.days is not None else get_storage_ttl_days()
+    result = cleanup_old_records(days=days)
+    print(
+        f"Cleanup complete: {result['removed_files']} record files, "
+        f"{result['removed_vault']} vault files, "
+        f"{result['removed_index']} index entries removed."
+    )

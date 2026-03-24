@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"os"
 
-	ecp "github.com/willau95/atlast-ecp/sdk-go"
+	ecp "github.com/willau95/atlast-ecp/sdk/go"
 )
 
 func main() {

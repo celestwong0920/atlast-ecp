@@ -147,8 +147,13 @@ async def upload_batch(
                 session.add(batch)
                 await session.commit()
                 logger.info("batch_stored", batch_id=batch_id, did=req.agent_did, records=req.record_count)
+                from .metrics import batch_upload_total, batch_upload_size
+                batch_upload_total.labels(status="success").inc()
+                batch_upload_size.observe(req.record_count)
         except Exception as e:
             logger.error("batch_store_failed", error=str(e), did=req.agent_did)
+            from .metrics import batch_upload_total
+            batch_upload_total.labels(status="failure").inc()
             raise HTTPException(status_code=500, detail="Failed to store batch")
     else:
         logger.warning("batch_no_db", batch_id=batch_id)

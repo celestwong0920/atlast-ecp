@@ -211,6 +211,7 @@ async def _anchor_super_batch(batches: list[dict], _anchor_start: float) -> dict
     from .metrics import anchor_total, anchor_latency
     anchor_total.labels(status="success").inc(anchored)
     anchor_total.labels(status="error").inc(errors)
+    anchor_latency.observe(_time.time() - _anchor_start)
 
     logger.info("super_batch_anchor_done", super_batch_id=super_batch_id, batch_count=len(batches), anchored=anchored, errors=errors)
     return {"processed": len(batches), "anchored": anchored, "errors": errors, "super_batch_id": super_batch_id}
@@ -348,6 +349,7 @@ async def _anchor_pending():
             from .metrics import anchor_total, anchor_latency
             anchor_total.labels(status="success").inc(anchored)
             anchor_total.labels(status="error").inc(errors)
+            anchor_latency.observe(_time.time() - _anchor_start)
 
             logger.info("anchor_cron_done", processed=len(batches), anchored=anchored, errors=errors)
             return {"processed": len(batches), "anchored": anchored, "errors": errors}

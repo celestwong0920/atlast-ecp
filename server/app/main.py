@@ -181,6 +181,22 @@ async def limit_request_size(request: Request, call_next):
     return await call_next(request)
 
 
+# ── Request Latency Middleware ───────────────────────────────────────────────
+
+import time as _wall_time
+
+@app.middleware("http")
+async def track_request_latency(request: Request, call_next):
+    start = _wall_time.time()
+    response = await call_next(request)
+    # Use matched route template to avoid label cardinality from path params
+    route = request.scope.get("route")
+    path = getattr(route, "path", request.url.path)
+    from .routes.metrics import api_request_latency
+    api_request_latency.labels(path=path).observe(_wall_time.time() - start)
+    return response
+
+
 # ── Global Exception Handler ────────────────────────────────────────────────
 
 @app.exception_handler(Exception)

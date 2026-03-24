@@ -98,3 +98,26 @@ def get_vault_backup_path() -> Optional[str]:
         return env
     cfg = load_config()
     return cfg.get("vault_backup_path") or None
+
+
+def get_storage_compress() -> bool:
+    """Get storage compression setting: env ECP_STORAGE_COMPRESS > False (default off)."""
+    val = os.environ.get("ECP_STORAGE_COMPRESS", "").lower()
+    return val in ("true", "1", "yes")
+
+
+def get_storage_ttl_days() -> int:
+    """Get TTL days for record cleanup: env ECP_STORAGE_TTL_DAYS > 0 (disabled)."""
+    val = os.environ.get("ECP_STORAGE_TTL_DAYS", "0")
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return 0
+
+
+def get_vault_mode() -> str:
+    """Get vault mode: env ECP_VAULT_MODE > 'full'. Values: full|hash_only|compact."""
+    val = os.environ.get("ECP_VAULT_MODE", "full").lower()
+    if val in ("full", "hash_only", "compact"):
+        return val
+    return "full"

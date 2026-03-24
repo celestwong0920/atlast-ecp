@@ -94,6 +94,9 @@ async def verify_attestation(attestation_uid: str):
     # Full on-chain verification via web3 planned for mainnet launch
     base_url = "https://base-sepolia.easscan.org" if is_testnet else "https://base.easscan.org"
 
+    from .metrics import attestation_verify_total
+    attestation_verify_total.labels(result="valid").inc()
+
     return {
         "attestation_uid": attestation_uid,
         "chain": settings.EAS_CHAIN,

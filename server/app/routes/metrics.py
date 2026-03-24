@@ -31,6 +31,16 @@ cron_failures = Gauge(
     "ecp_cron_consecutive_failures", "Consecutive cron failures"
 )
 
+batch_upload_total = Counter(
+    "ecp_batch_upload_total", "Total batch uploads", ["status"]
+)
+batch_upload_size = Histogram(
+    "ecp_batch_upload_size_records", "Records per batch upload"
+)
+api_request_latency = Histogram(
+    "ecp_api_request_latency_seconds", "API request latency", ["path"]
+)
+
 
 @router.get("/metrics")
 async def metrics():
