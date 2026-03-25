@@ -101,14 +101,16 @@ async def lifespan(app: FastAPI):
     # Run first anchor 60s after startup, then every interval
     from datetime import timedelta
     first_run = datetime.now(timezone.utc) + timedelta(seconds=60)
-    scheduler.add_job(
-        _scheduled_anchor,
-        "interval",
-        minutes=interval,
-        id="anchor_cron",
-        next_run_time=first_run,
-    )
-    scheduler.start()
+    if not scheduler.get_job("anchor_cron"):
+        scheduler.add_job(
+            _scheduled_anchor,
+            "interval",
+            minutes=interval,
+            id="anchor_cron",
+            next_run_time=first_run,
+        )
+    if not scheduler.running:
+        scheduler.start()
     logger.info("cron_started", interval_minutes=interval)
 
     # Init database (if configured)

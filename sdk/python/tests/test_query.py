@@ -46,7 +46,7 @@ def setup_ecp_dir(monkeypatch, tmp_path):
     now_ms = int(time.time() * 1000)
     records = []
     for i in range(10):
-        ts = now_ms - (9 - i) * 3600_000  # 1 hour apart
+        ts = now_ms - (9 - i) * 60_000  # 1 minute apart (keep all in same day)
         record = {
             "id": f"rec_test_{i:04d}",
             "agent": "did:ecp:test_agent_001",
