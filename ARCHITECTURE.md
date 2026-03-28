@@ -73,7 +73,7 @@ atlast-ecp/
                    ▼
            ┌────────────────┐
            │  LLaChat API   │  POST /v1/batches
-           │  (Alex's side) │  X-Agent-Key: ak_live_xxx
+           │  (Consumer)    │  X-Agent-Key: ak_live_xxx
            └───────┬────────┘
                    │ marks batch as "pending"
                    ▼
