@@ -10,6 +10,7 @@ Signature format: ed25519:{hex}
 
 import hashlib
 import json
+import stat
 import time
 from pathlib import Path
 
@@ -36,6 +37,15 @@ def _now_ms() -> int:
 def _resolve_ecp_dir() -> Path:
     """Resolve ECP_DIR at call time (not import time) for env var changes."""
     return Path(_os.environ.get("ATLAST_ECP_DIR", _os.environ.get("ECP_DIR", _os.path.expanduser("~/.ecp"))))
+
+
+def _secure_write(filepath: Path, data: str) -> None:
+    """Write file and set 0600 permissions on Unix (private key protection)."""
+    filepath.write_text(data)
+    try:
+        filepath.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+    except OSError:
+        pass  # Windows or restricted filesystem — best effort
 
 
 def get_or_create_identity(agent_name: str | None = None, ecp_dir: str | None = None) -> dict:
@@ -94,7 +104,7 @@ def _maybe_migrate_identity(identity: dict, ifile: Path) -> dict:
     identity["migrated_from_fallback"] = True
     identity["migrated_at"] = _now_ms()
 
-    ifile.write_text(json.dumps(identity, indent=2))
+    _secure_write(ifile, json.dumps(identity, indent=2))
     return identity
 
 
@@ -162,7 +172,7 @@ def _create_identity(edir: Path | None = None) -> dict:
         identity["recovery_version"] = 1
         identity["entropy_hash"] = entropy_hash
 
-    ifile.write_text(json.dumps(identity, indent=2))
+    _secure_write(ifile, json.dumps(identity, indent=2))
     
     # Attach mnemonic transiently (NOT persisted to disk)
     if mnemonic_words:

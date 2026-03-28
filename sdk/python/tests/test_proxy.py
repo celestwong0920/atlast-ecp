@@ -84,9 +84,15 @@ class TestUpstreamResolution:
     def test_default_gemini(self):
         assert _resolve_upstream({}, "gemini") == "https://generativelanguage.googleapis.com"
 
-    def test_explicit_header_override(self):
-        headers = {"X-Real-API-URL": "https://custom.api.example.com/"}
-        assert _resolve_upstream(headers, "openai") == "https://custom.api.example.com"
+    def test_explicit_header_override_allowed(self):
+        # Only known upstream domains are accepted via header override
+        headers = {"X-Real-API-URL": "https://api.openai.com/v2"}
+        assert _resolve_upstream(headers, "openai") == "https://api.openai.com/v2"
+
+    def test_explicit_header_override_blocked(self):
+        # Unknown domains are rejected — falls through to default
+        headers = {"X-Real-API-URL": "https://evil.example.com/"}
+        assert _resolve_upstream(headers, "openai") == "https://api.openai.com"
 
     def test_env_var_override(self):
         with patch.dict(os.environ, {"ATLAST_UPSTREAM_URL": "https://my.proxy.com"}):

@@ -47,7 +47,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._serve_file("index.html", "text/html")
 
     def _serve_file(self, filename: str, content_type: str):
-        filepath = ASSETS_DIR / filename
+        filepath = (ASSETS_DIR / filename).resolve()
+        # Prevent path traversal — file must be under ASSETS_DIR
+        if not str(filepath).startswith(str(ASSETS_DIR.resolve())):
+            self.send_error(403, "Forbidden")
+            return
         if not filepath.exists():
             self.send_error(404)
             return

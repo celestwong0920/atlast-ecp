@@ -98,10 +98,23 @@ UPSTREAM_ENV_VARS = [
 
 def _resolve_upstream(request_headers: dict, provider: str) -> str:
     """Determine the real upstream API URL."""
-    # 1. Explicit header override
+    # 1. Explicit header override (validated against known domains)
     explicit = request_headers.get("X-Real-API-URL") or request_headers.get("x-real-api-url")
     if explicit:
-        return explicit.rstrip("/")
+        from urllib.parse import urlparse
+        allowed_domains = set(urlparse(u).netloc for u in DEFAULT_UPSTREAMS.values())
+        # Also allow env-configured upstreams
+        for var in UPSTREAM_ENV_VARS:
+            val = os.environ.get(var)
+            if val:
+                allowed_domains.add(urlparse(val).netloc)
+        parsed = urlparse(explicit)
+        if parsed.netloc not in allowed_domains:
+            import structlog
+            structlog.get_logger().warning("proxy_blocked_upstream", url=explicit, allowed=list(allowed_domains))
+            # Fall through to env/default instead of using untrusted URL
+        else:
+            return explicit.rstrip("/")
 
     # 2. Env vars
     for var in UPSTREAM_ENV_VARS:

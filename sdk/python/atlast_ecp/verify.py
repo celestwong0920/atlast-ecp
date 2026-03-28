@@ -38,11 +38,11 @@ def verify_signature(public_key_hex: str, sig: str, data: str) -> bool:
         data: The original data that was signed (e.g., merkle_root string)
 
     Returns:
-        True if signature is valid, False if invalid.
-        "unverified" signatures return True (agent without cryptography package).
+        True if signature is cryptographically valid.
+        False if signature is invalid, missing, "unverified", or cannot be checked.
     """
     if sig == "unverified":
-        return True
+        return False  # No signature present — cannot confirm authenticity
 
     if not sig.startswith("ed25519:"):
         return False
@@ -57,8 +57,8 @@ def verify_signature(public_key_hex: str, sig: str, data: str) -> bool:
         public_key.verify(sig_bytes, data.encode())
         return True
     except ImportError:
-        # No cryptography package — cannot verify, assume valid
-        return True
+        # No cryptography package — cannot verify
+        return False
     except Exception:
         return False
 
@@ -179,17 +179,20 @@ def verify_record(record_dict: dict) -> dict:
     if sig == "unverified":
         signature_ok = None  # Cannot verify — no signature present
     elif sig.startswith("ed25519:"):
-        # Try to load local identity to verify
+        # Try to load existing local identity to verify (never create one)
         try:
-            from .identity import get_or_create_identity
-            identity = get_or_create_identity()
-            agent_did = record_dict.get("agent", "")
-            local_did = identity.get("did", "")
-            pub_key = identity.get("crypto_pub_key") or identity.get("pub_key")
-            if agent_did == local_did and pub_key:
-                signature_ok = verify_signature(pub_key, sig, actual_hash)
-                if not signature_ok:
-                    errors.append("Signature verification failed against local identity")
+            from .identity import _resolve_ecp_dir
+            ifile = _resolve_ecp_dir() / "identity.json"
+            if ifile.exists():
+                import json as _json
+                identity = _json.loads(ifile.read_text())
+                agent_did = record_dict.get("agent", "")
+                local_did = identity.get("did", "")
+                pub_key = identity.get("crypto_pub_key") or identity.get("pub_key")
+                if agent_did == local_did and pub_key:
+                    signature_ok = verify_signature(pub_key, sig, actual_hash)
+                    if not signature_ok:
+                        errors.append("Signature verification failed against local identity")
         except Exception:
             pass  # Can't load identity — leave as None
 

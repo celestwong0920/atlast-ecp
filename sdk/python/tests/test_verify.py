@@ -8,9 +8,9 @@ def _sha256(data: str) -> str:
 
 
 class TestVerifySignature:
-    def test_unverified_returns_true(self):
+    def test_unverified_returns_false(self):
         from atlast_ecp.verify import verify_signature
-        assert verify_signature("deadbeef" * 8, "unverified", "anything") is True
+        assert verify_signature("deadbeef" * 8, "unverified", "anything") is False
 
     def test_invalid_prefix_returns_false(self):
         from atlast_ecp.verify import verify_signature

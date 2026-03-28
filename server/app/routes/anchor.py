@@ -292,8 +292,8 @@ async def _anchor_pending():
                     # Record successful nonce
                     if eas_tx_hash:
                         from ..services.anchor_coordinator import record_successful_nonce
-                        # Extract nonce from receipt if available
-                        await record_successful_nonce(0, eas_tx_hash)
+                        tx_nonce = eas_result.get("tx_nonce", 0)
+                        await record_successful_nonce(tx_nonce, eas_tx_hash)
 
                     if batch.get("_source") == "local":
                         await _mark_local_batch_anchored(batch["batch_id"], attestation_uid, eas_tx_hash)

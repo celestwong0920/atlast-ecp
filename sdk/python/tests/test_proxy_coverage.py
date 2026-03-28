@@ -30,10 +30,10 @@ class TestResolveUpstreamEnvVars:
         assert _resolve_upstream({}, "openai") == "https://openai-base.example.com"
 
     def test_lowercase_header(self, monkeypatch):
-        # Test lowercase header key
+        # Test lowercase header key — must use an allowed upstream domain
         from atlast_ecp.proxy import _resolve_upstream
-        headers = {"x-real-api-url": "https://lowercase-header.example.com/"}
-        assert _resolve_upstream(headers, "openai") == "https://lowercase-header.example.com"
+        headers = {"x-real-api-url": "https://api.anthropic.com/v2"}
+        assert _resolve_upstream(headers, "openai") == "https://api.anthropic.com/v2"
 
     def test_default_minimax(self, monkeypatch):
         for var in ["ATLAST_UPSTREAM_URL", "ATLAST_OPENAI_UPSTREAM", "ATLAST_ANTHROPIC_UPSTREAM",

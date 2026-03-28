@@ -123,7 +123,7 @@ async def _live_attestation(
 
     # Build, sign, send transaction (sync web3 calls in async context)
     import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     # Get coordinated nonce (prevents concurrent tx conflicts)
     from .anchor_coordinator import get_next_nonce, record_successful_nonce
@@ -142,13 +142,26 @@ async def _live_attestation(
 
         nonce = coordinated_nonce if coordinated_nonce is not None else w3.eth.get_transaction_count(account.address)
         base_fee = w3.eth.get_block('latest').baseFeePerGas
+
+        # Estimate gas dynamically with 1.5x safety margin (fallback: 500k)
+        try:
+            estimated_gas = w3.eth.estimate_gas({
+                "from": account.address,
+                "to": EAS_CONTRACT,
+                "data": calldata,
+                "value": 0,
+            })
+            gas_limit = int(estimated_gas * 1.5)
+        except Exception:
+            gas_limit = 500000  # Safe fallback
+
         tx = {
             "from": account.address,
             "to": EAS_CONTRACT,
             "data": calldata,
             "nonce": nonce,
-            "gas": 500000,
-            "maxFeePerGas": base_fee * 3,
+            "gas": gas_limit,
+            "maxFeePerGas": base_fee * 2,
             "maxPriorityFeePerGas": w3.to_wei(0.001, 'gwei'),
             "chainId": BASE_CHAIN_ID,
             "value": 0,
@@ -161,9 +174,9 @@ async def _live_attestation(
 
     tx_hash, receipt, used_nonce = await loop.run_in_executor(None, _send_tx)
 
-    # Record successful nonce for coordination
-    await record_successful_nonce(used_nonce, f"0x{tx_hash.hex()}")
     tx_hash_hex = f"0x{tx_hash.hex()}"
+    # Record successful nonce for coordination
+    await record_successful_nonce(used_nonce, tx_hash_hex)
 
     if receipt['status'] != 1:
         raise ValueError(f"Transaction reverted: {tx_hash_hex}")
@@ -182,6 +195,7 @@ async def _live_attestation(
     return {
         "attestation_uid": attestation_uid,
         "tx_hash": tx_hash_hex,
+        "tx_nonce": used_nonce,
         "eas_url": f"{EAS_SCAN_BASE}/attestation/view/{attestation_uid}",
         "anchored_at": int(time.time() * 1000),
         "mode": "live",
