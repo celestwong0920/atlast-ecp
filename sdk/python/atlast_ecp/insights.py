@@ -554,6 +554,7 @@ def cmd_insights(args: list[str]):
     as_json = "--json" in args
     section = None
     bucket = "day"
+    agent_filter = None
 
     for i, a in enumerate(args):
         if a == "--limit" and i + 1 < len(args):
@@ -564,8 +565,24 @@ def cmd_insights(args: list[str]):
             section = args[i + 1].lower()
         if a == "--bucket" and i + 1 < len(args):
             bucket = args[i + 1].lower()
+        if a == "--agent" and i + 1 < len(args):
+            agent_filter = args[i + 1]
 
     records = load_records(limit=limit)
+
+    # Filter by agent DID if specified
+    if agent_filter:
+        records = [r for r in records if r.get("agent", "") == agent_filter or
+                   agent_filter in r.get("agent", "")]
+        if not records:
+            print(f"⚠️  No records found for agent: {agent_filter}")
+            print(f"   Available agents:")
+            all_records = load_records(limit=limit)
+            agents = set(r.get("agent", "unknown") for r in all_records)
+            for a in sorted(agents):
+                count = sum(1 for r in all_records if r.get("agent") == a)
+                print(f"     {a} ({count} records)")
+            return
 
     if section:
         if section in ("performance", "perf"):

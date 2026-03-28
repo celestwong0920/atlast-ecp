@@ -290,7 +290,20 @@ def cmd_did(args: list[str]):
 
 
 def cmd_flush(args: list[str]):
-    """atlast flush [--endpoint URL] [--key ak_live_xxx] — force Merkle batch upload now"""
+    """atlast flush [--endpoint URL] [--key ak_live_xxx] — force Merkle batch upload now
+
+    Options:
+      --endpoint URL   Override server URL
+      --key KEY        Agent API key (from 'atlast register')
+
+    Environment:
+      ATLAST_API_URL   Default server URL
+      ATLAST_ECP_DIR   Custom storage directory
+    """
+    if "--help" in args or "-h" in args:
+        print(cmd_flush.__doc__)
+        return
+
     import os
     from .config import get_api_url, get_api_key
 
@@ -318,9 +331,27 @@ def cmd_flush(args: list[str]):
 
     target = endpoint or get_api_url()
     print(f"⏫ Triggering Merkle batch upload → {target}")
-    trigger_batch_upload(flush=True)
-    import time; time.sleep(2)
-    print("✅ Done (check .ecp/batch_state.json for result)")
+
+    from .batch import run_batch
+    result = run_batch(flush=True)
+
+    if result is None:
+        print("ℹ️  No records to upload.")
+    elif result.get("uploaded"):
+        batch_id = result.get("batch_id", "")
+        print(f"✅ Uploaded successfully! Batch: {batch_id}")
+        print(f"   Merkle root: {result.get('merkle_root', '')[:50]}...")
+        print(f"   Records: {result.get('record_count', 0)}")
+    elif result.get("queued"):
+        print(f"⚠️  Upload queued (server unreachable or agent not registered).")
+        print(f"   Merkle root: {result.get('merkle_root', '')[:50]}...")
+        print(f"   Records: {result.get('record_count', 0)}")
+        if not resolved_key:
+            print(f"\n   💡 Tip: Run 'atlast register' first to get an API key.")
+            print(f"           Then: 'atlast flush --key <your_key>'")
+    else:
+        print(f"❌ Upload failed: {result.get('error', 'unknown')}")
+        print(f"   Records are safely stored locally in ~/.ecp/records/")
 
 
 def cmd_register(args: list[str]):
@@ -462,19 +493,57 @@ def cmd_certify(args: list[str]):
 
 
 def cmd_init(args: list[str]):
-    """atlast init [--minimal] [--non-interactive] — initialize ~/.ecp/ + generate DID"""
-    from .storage import init_storage
+    """atlast init [--minimal] [--non-interactive] [--upgrade] — initialize ~/.ecp/ + generate DID
+
+    Options:
+      --minimal           Skip identity generation
+      --non-interactive   No prompts (CI-friendly)
+      --upgrade           Upgrade fallback identity to Ed25519 (if crypto libs available)
+
+    Environment:
+      ATLAST_ECP_DIR      Custom storage directory (default: ~/.ecp)
+    """
+    if "--help" in args or "-h" in args:
+        print(cmd_init.__doc__)
+        return
+
+    from .storage import init_storage, ECP_DIR
     init_storage()
 
     skip_identity = "--minimal" in args or "--no-identity" in args
     non_interactive = "--non-interactive" in args or not sys.stdin.isatty()
+    do_upgrade = "--upgrade" in args
 
     print(f"\n🔗 ATLAST ECP initialized")
-    print(f"  Storage: ~/.ecp/records/ (local, private)")
+    print(f"  Storage: {ECP_DIR}/records/ (local, private)")
 
     if not skip_identity:
         from .identity import get_or_create_identity
         identity = get_or_create_identity()
+
+        # Handle --upgrade: regenerate Ed25519 identity if currently fallback
+        if do_upgrade and not identity.get("verified"):
+            try:
+                from nacl.signing import SigningKey
+                import json, stat
+                sk = SigningKey.generate()
+                pub = sk.verify_key.encode().hex()
+                priv = sk.encode().hex()
+                old_did = identity.get("did", "")
+                identity["pub_key"] = pub
+                identity["priv_key"] = priv
+                identity["verified"] = True
+                # Write back
+                id_file = ECP_DIR / "identity.json"
+                id_file.write_text(json.dumps(identity, indent=2))
+                try:
+                    id_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
+                except OSError:
+                    pass
+                print(f"  ⬆️  Upgraded to Ed25519! (DID unchanged: {old_did})")
+            except ImportError:
+                print(f"  ⚠️  Cannot upgrade: install PyNaCl first (pip install pynacl)")
+
         print(f"  Agent DID: {identity['did']}")
         print(f"  Key type: {'ed25519' if identity.get('verified') else 'fallback'}")
         

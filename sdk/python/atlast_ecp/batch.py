@@ -25,7 +25,12 @@ from typing import Optional
 from .storage import load_records, count_records, enqueue_for_upload, get_upload_queue, clear_upload_queue
 from .identity import get_or_create_identity, sign as sign_data
 
-ECP_DIR = Path(".ecp")
+def _batch_ecp_dir() -> Path:
+    """Resolve ECP_DIR at call time (respects ATLAST_ECP_DIR env)."""
+    import os
+    return Path(os.environ.get("ATLAST_ECP_DIR", os.environ.get("ECP_DIR", os.path.expanduser("~/.ecp"))))
+
+ECP_DIR = _batch_ecp_dir()
 BATCH_STATE_FILE = ECP_DIR / "batch_state.json"
 # Production backend — Railway deployment
 # Server URL configured via ATLAST_API_URL env or ~/.atlast/config.json
