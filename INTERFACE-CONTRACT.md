@@ -21,8 +21,8 @@ SDK → LLaChat (batch submit) → ATLAST ECP Server (anchor) → LLaChat (webho
 | Token | Purpose | Location | Format |
 |-------|---------|----------|--------|
 | **X-Agent-Key** | SDK → LLaChat batch submit | HTTP header | `ak_live_{40hex}` |
-| **LLACHAT_INTERNAL_TOKEN** | Atlas → LLaChat internal APIs | HTTP header `X-Internal-Token` | UUID `4b141c34-d8e1-4e7a-b1a1-e7a29231bf4a` |
-| **ECP_WEBHOOK_TOKEN** | HMAC signing for webhooks | Shared secret | `b84ca16a14f920c99586697d964a28d0e71e6cd939478d2a22f5cc860435dffd` |
+| **LLACHAT_INTERNAL_TOKEN** | Atlas → LLaChat internal APIs | HTTP header `X-Internal-Token` | Set via environment variable (never commit) |
+| **ECP_WEBHOOK_TOKEN** | HMAC signing for webhooks | Shared secret | Set via environment variable (never commit) |
 
 ---
 

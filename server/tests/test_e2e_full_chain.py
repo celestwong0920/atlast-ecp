@@ -22,7 +22,7 @@ import httpx
 
 ECP_SERVER = os.getenv("ECP_SERVER", "https://ecp-server-production.up.railway.app")
 LLACHAT_API = os.getenv("LLACHAT_API", "https://api.llachat.com")
-INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "4b141c3e46e735a409bf95e010b46335724285c81c5e4e6319af2e252176bf4a")
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "test-only-token-not-for-production-use")
 AGENT_KEY_FILE = os.path.expanduser("~/.ecp/production-agents/atlas.json")
 
 passed = 0
