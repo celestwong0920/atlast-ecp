@@ -11,19 +11,27 @@ import (
 	"time"
 )
 
+// RecordHashEntry matches the server's expected record_hashes item format.
+type RecordHashEntry struct {
+	ID    string   `json:"id"`
+	Hash  string   `json:"hash"`
+	Flags []string `json:"flags"`
+}
+
 // Batch represents a batch of ECP records ready for upload.
 type Batch struct {
-	ID           string   `json:"id"`
-	MerkleRoot   string   `json:"merkle_root"`
-	RecordCount  int      `json:"record_count"`
-	RecordHashes []string `json:"record_hashes"`
-	CreatedAt    int64    `json:"created_at"`
+	ID           string            `json:"id"`
+	MerkleRoot   string            `json:"merkle_root"`
+	RecordCount  int               `json:"record_count"`
+	RecordHashes []RecordHashEntry `json:"record_hashes"`
+	CreatedAt    int64             `json:"created_at"`
 }
 
 // BuildBatch creates a Batch from a slice of records.
 // The MerkleRoot is computed from each record's chain hash (or computed hash if chain is absent).
 func BuildBatch(records []Record) Batch {
 	hashes := make([]string, 0, len(records))
+	entries := make([]RecordHashEntry, 0, len(records))
 	for _, r := range records {
 		h := ""
 		if r.Chain != nil && r.Chain.Hash != "" {
@@ -32,6 +40,11 @@ func BuildBatch(records []Record) Batch {
 			h = ComputeChainHash(r)
 		}
 		hashes = append(hashes, h)
+		flags := []string{}
+		if r.Meta != nil && len(r.Meta.Flags) > 0 {
+			flags = r.Meta.Flags
+		}
+		entries = append(entries, RecordHashEntry{ID: r.ID, Hash: h, Flags: flags})
 	}
 
 	root := BuildMerkleRoot(hashes)
@@ -43,7 +56,7 @@ func BuildBatch(records []Record) Batch {
 		ID:           "batch_" + hex.EncodeToString(b),
 		MerkleRoot:   root,
 		RecordCount:  len(records),
-		RecordHashes: hashes,
+		RecordHashes: entries,
 		CreatedAt:    time.Now().UnixMilli(),
 	}
 }

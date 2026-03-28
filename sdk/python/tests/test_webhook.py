@@ -97,9 +97,12 @@ class TestFireWebhook:
         url, _ = mock_server
         fire_webhook({"x": 1}, url, token="secret-token")
         hdrs = _MockHandler.received[0]["headers"]
-        # Headers may be case-insensitive; check both forms
+        # Plaintext token header should NOT be sent (HMAC-only)
         token = hdrs.get("X-ECP-Webhook-Token") or hdrs.get("X-Ecp-Webhook-Token") or hdrs.get("x-ecp-webhook-token")
-        assert token == "secret-token"
+        assert token is None, "X-ECP-Webhook-Token should not be sent (HMAC-only)"
+        # HMAC signature should be present
+        sig = hdrs.get("X-ECP-Signature") or hdrs.get("X-Ecp-Signature") or hdrs.get("x-ecp-signature")
+        assert sig is not None and sig.startswith("sha256="), "X-ECP-Signature header required"
 
     def test_fail_open_unreachable(self):
         result = fire_webhook({"test": True}, "http://127.0.0.1:1", timeout=1)

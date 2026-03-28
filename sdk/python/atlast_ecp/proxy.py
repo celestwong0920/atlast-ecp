@@ -187,6 +187,8 @@ def _reconstruct_sse_content(chunks: bytes, provider: str) -> str:
 # ─── Message Extraction (Vault v2) ────────────────────────────────────────────
 
 # Session tracking for system prompt deduplication
+# Capped at 1000 entries to prevent unbounded memory growth
+_SESSION_CACHE_MAX = 1000
 _session_system_prompts: dict[str, str] = {}  # session_id → last system_prompt_hash
 _session_lock = threading.Lock()
 
@@ -277,6 +279,12 @@ def _extract_new_content(req_body: bytes, provider: str) -> dict:
         with _session_lock:
             prev_hash = _session_system_prompts.get(session_id)
             if prev_hash != sp_hash:
+                # Evict oldest entries if cache is full
+                if len(_session_system_prompts) >= _SESSION_CACHE_MAX:
+                    # Remove first ~10% of entries (oldest by insertion order)
+                    to_remove = list(_session_system_prompts.keys())[:_SESSION_CACHE_MAX // 10]
+                    for k in to_remove:
+                        del _session_system_prompts[k]
                 # First time or changed — store it
                 _session_system_prompts[session_id] = sp_hash
                 result["system_prompt"] = system_prompt

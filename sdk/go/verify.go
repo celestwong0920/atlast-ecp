@@ -9,18 +9,56 @@ import (
 // ComputeChainHash computes the chain hash for a record.
 // Matches Python SDK record.py compute_chain_hash():
 // SHA-256 of canonical JSON of the full record, with chain.hash and sig zeroed.
+// Uses map[string]interface{} so json.Marshal produces alphabetically sorted keys,
+// matching Python's json.dumps(sort_keys=True) and TS's stableStringify().
 func ComputeChainHash(r Record) string {
-	// Deep copy to avoid mutation, zero out chain.hash and sig
-	clone := r
-	if clone.Chain != nil {
-		chainCopy := *clone.Chain
-		chainCopy.Hash = ""
-		clone.Chain = &chainCopy
+	// Build a map for alphabetically-sorted key output
+	m := map[string]interface{}{
+		"ecp":      r.ECP,
+		"id":       r.ID,
+		"ts":       r.TS,
+		"agent":    r.Agent,
+		"action":   r.Action,
+		"in_hash":  r.InHash,
+		"out_hash": r.OutHash,
+		"sig":      "",
 	}
-	clone.Sig = ""
 
-	// json.Marshal produces sorted keys by default for structs
-	data, _ := json.Marshal(clone)
+	// Include meta if present (omit if nil)
+	if r.Meta != nil {
+		metaMap := map[string]interface{}{}
+		if r.Meta.Model != "" {
+			metaMap["model"] = r.Meta.Model
+		}
+		if r.Meta.TokensIn != 0 {
+			metaMap["tokens_in"] = r.Meta.TokensIn
+		}
+		if r.Meta.TokensOut != 0 {
+			metaMap["tokens_out"] = r.Meta.TokensOut
+		}
+		if r.Meta.LatencyMs != 0 {
+			metaMap["latency_ms"] = r.Meta.LatencyMs
+		}
+		if r.Meta.CostUSD != 0 {
+			metaMap["cost_usd"] = r.Meta.CostUSD
+		}
+		if len(r.Meta.Flags) > 0 {
+			metaMap["flags"] = r.Meta.Flags
+		}
+		if len(metaMap) > 0 {
+			m["meta"] = metaMap
+		}
+	}
+
+	// Chain: always include with hash zeroed
+	if r.Chain != nil {
+		m["chain"] = map[string]interface{}{
+			"prev": r.Chain.Prev,
+			"hash": "",
+		}
+	}
+
+	data, _ := json.Marshal(m)
 	h := sha256.Sum256(data)
 	return fmt.Sprintf("sha256:%x", h)
 }

@@ -74,7 +74,6 @@ async def fire_attestation_webhook(
 
     headers = {
         "Content-Type": "application/json",
-        "X-ECP-Webhook-Token": settings.ECP_WEBHOOK_TOKEN,
         "X-ECP-Signature": f"sha256={signature}",
     }
 

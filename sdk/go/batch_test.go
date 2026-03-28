@@ -37,11 +37,11 @@ func TestBuildBatchSingle(t *testing.T) {
 	if len(b.RecordHashes) != 1 {
 		t.Errorf("want 1 record hash, got %d", len(b.RecordHashes))
 	}
-	if !strings.HasPrefix(b.RecordHashes[0], "sha256:") {
-		t.Errorf("record hash should start with 'sha256:', got %q", b.RecordHashes[0])
+	if !strings.HasPrefix(b.RecordHashes[0].Hash, "sha256:") {
+		t.Errorf("record hash should start with 'sha256:', got %q", b.RecordHashes[0].Hash)
 	}
 	// Single record: merkle root == the hash itself
-	if b.MerkleRoot != b.RecordHashes[0] {
+	if b.MerkleRoot != b.RecordHashes[0].Hash {
 		t.Errorf("single-record merkle root should equal the record hash")
 	}
 }
@@ -64,7 +64,11 @@ func TestBuildBatchMultiple(t *testing.T) {
 		t.Errorf("merkle root should start with 'sha256:', got %q", b.MerkleRoot)
 	}
 	// Verify root matches what BuildMerkleRoot would produce
-	expected := BuildMerkleRoot(b.RecordHashes)
+	hashes := make([]string, len(b.RecordHashes))
+	for i, e := range b.RecordHashes {
+		hashes[i] = e.Hash
+	}
+	expected := BuildMerkleRoot(hashes)
 	if b.MerkleRoot != expected {
 		t.Errorf("MerkleRoot mismatch: want %q, got %q", expected, b.MerkleRoot)
 	}
@@ -76,8 +80,8 @@ func TestBuildBatchUsesChainHash(t *testing.T) {
 	r.Chain = &Chain{Prev: "", Hash: chainHash}
 
 	b := BuildBatch([]Record{r})
-	if b.RecordHashes[0] != chainHash {
-		t.Errorf("should use chain.hash when present: want %q, got %q", chainHash, b.RecordHashes[0])
+	if b.RecordHashes[0].Hash != chainHash {
+		t.Errorf("should use chain.hash when present: want %q, got %q", chainHash, b.RecordHashes[0].Hash)
 	}
 }
 
@@ -86,8 +90,22 @@ func TestBuildBatchFallsBackToComputedHash(t *testing.T) {
 	// No chain field
 	b := BuildBatch([]Record{r})
 	expected := ComputeChainHash(r)
-	if b.RecordHashes[0] != expected {
-		t.Errorf("should fall back to ComputeChainHash: want %q, got %q", expected, b.RecordHashes[0])
+	if b.RecordHashes[0].Hash != expected {
+		t.Errorf("should fall back to ComputeChainHash: want %q, got %q", expected, b.RecordHashes[0].Hash)
+	}
+}
+
+func TestBuildBatchRecordHashEntryFields(t *testing.T) {
+	r := NewMinimalRecord("a", "call", "in", "out")
+	r.Meta = &Meta{Flags: []string{"hedged", "retried"}}
+	b := BuildBatch([]Record{r})
+
+	entry := b.RecordHashes[0]
+	if entry.ID != r.ID {
+		t.Errorf("entry ID: want %q, got %q", r.ID, entry.ID)
+	}
+	if len(entry.Flags) != 2 {
+		t.Errorf("entry Flags: want 2, got %d", len(entry.Flags))
 	}
 }
 

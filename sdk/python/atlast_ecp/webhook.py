@@ -69,8 +69,6 @@ def fire_webhook(
     import hmac as hmac_mod
 
     headers = {"Content-Type": "application/json"}
-    if token:
-        headers["X-ECP-Webhook-Token"] = token
 
     # Deterministic serialization — same bytes for signing and sending
     data = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
