@@ -71,6 +71,77 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _dispatch_api(self, path: str, params: dict) -> dict:
         from .query import search, trace, audit, timeline, rebuild_index
 
+        # ── Vault: raw input/output for a record ──
+        if path.startswith("/api/vault/"):
+            record_id = path.split("/api/vault/")[1]
+            if not record_id:
+                return {"error": "record_id required"}
+            from .storage import ECP_DIR
+            vault_file = ECP_DIR / "vault" / f"{record_id}.json"
+            if not vault_file.exists():
+                return {
+                    "error": f"Vault file not found for {record_id}",
+                    "hint": "Raw content is only stored when using wrap() or record(). Callback adapters may not store vault data.",
+                    "vault_path": str(vault_file),
+                }
+            try:
+                vault_data = json.loads(vault_file.read_text())
+            except Exception as exc:
+                return {"error": f"Failed to read vault: {exc}"}
+            # Truncate very long content for display
+            for key in ("input", "output"):
+                val = vault_data.get(key, "")
+                if isinstance(val, str) and len(val) > 10000:
+                    vault_data[key] = val[:10000] + f"\n\n... (truncated, full content: {len(val)} chars)"
+            vault_data["_vault_path"] = str(vault_file)
+            vault_data["_ecp_dir"] = str(ECP_DIR)
+            return vault_data
+
+        # ── Guide: onboarding info for new users ──
+        if path == "/api/guide":
+            from .storage import ECP_DIR, RECORDS_DIR, VAULT_DIR
+            from .identity import get_or_create_identity
+            try:
+                identity = get_or_create_identity()
+                did = identity.get("did", "unknown")
+            except Exception:
+                did = "not initialized"
+            record_files = sorted(RECORDS_DIR.glob("*.jsonl")) if RECORDS_DIR.exists() else []
+            vault_count = len(list(VAULT_DIR.iterdir())) if VAULT_DIR.exists() else 0
+            return {
+                "welcome": "Welcome to ATLAST ECP Dashboard — your AI agent's evidence chain viewer.",
+                "what_is_this": "Every time your AI agent makes an LLM call, ECP records a tamper-proof evidence trail locally on your machine.",
+                "your_agent": {
+                    "did": did,
+                    "explanation": "This is your agent's unique identity (DID). All evidence records are tied to this ID."
+                },
+                "your_data": {
+                    "ecp_dir": str(ECP_DIR),
+                    "records_dir": str(RECORDS_DIR),
+                    "vault_dir": str(VAULT_DIR),
+                    "record_files": [str(f) for f in record_files],
+                    "vault_files_count": vault_count,
+                    "explanation": "Records contain hashed metadata (no raw content). Vault stores the original input/output locally."
+                },
+                "how_to_use": {
+                    "step_1": "📊 Stats — See total records, reliability score, chain integrity",
+                    "step_2": "📅 Timeline — View daily activity trends (records per day, error rates)",
+                    "step_3": "🔍 Search — Find specific records by type, model, or flags",
+                    "step_4": "🔗 Trace — Click any record to see its full chain (each record links to the previous one)",
+                    "step_5": "📋 Audit — Get a 30-day health report of your agent's behavior",
+                    "step_6": "👁️ Vault — Click a record to see the original AI input/output (stored locally, never uploaded)"
+                },
+                "cli_commands": {
+                    "atlast stats": "View trust signals summary",
+                    "atlast log": "See latest records",
+                    "atlast timeline": "Daily activity breakdown",
+                    "atlast push": "Upload records to server for on-chain anchoring",
+                    "atlast verify": "Verify a record's chain integrity",
+                    "atlast export": "Export all records as JSON"
+                },
+                "privacy": "All data stays on your machine. The vault (raw AI conversations) never leaves your device unless you explicitly push."
+            }
+
         if path == "/api/search":
             query = params.get("q", [""])[0]
             limit = int(params.get("limit", ["20"])[0])
@@ -106,26 +177,38 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return {"indexed": count}
 
         elif path == "/api/stats":
-            from .storage import count_records
+            from .storage import count_records, ECP_DIR, RECORDS_DIR, VAULT_DIR
             from .identity import get_or_create_identity
             try:
                 identity = get_or_create_identity()
                 did = identity.get("did", "unknown")
             except Exception:
                 did = "not initialized"
+            # Count vault files
+            vault_count = 0
+            if VAULT_DIR.exists():
+                vault_count = len(list(VAULT_DIR.iterdir()))
+            # Count record files for session approximation
+            record_files = []
+            if RECORDS_DIR.exists():
+                record_files = sorted(RECORDS_DIR.glob("*.jsonl"))
             return {
                 "total_records": count_records(),
                 "agent_did": did,
-                "ecp_dir": str(os.environ.get("ECP_DIR", "~/.ecp")),
+                "ecp_dir": str(ECP_DIR),
+                "vault_count": vault_count,
+                "record_files": [f.name for f in record_files],
+                "active_days": len(record_files),
+                "has_vault": vault_count > 0,
             }
 
         return {"error": f"Unknown API: {path}"}
 
     def _json_response(self, status: int, data: dict):
-        body = json.dumps(data, default=str).encode("utf-8")
+        body = json.dumps(data, default=str, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        # No CORS header — dashboard HTML is served from same origin (127.0.0.1)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
