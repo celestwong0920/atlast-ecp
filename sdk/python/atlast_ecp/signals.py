@@ -156,43 +156,75 @@ def compute_trust_signals(records: list[dict]) -> dict:
     """
     Compute aggregate Trust Score input signals from a list of ECP records.
     All signals are passive and objective. No self-reporting.
+
+    Key distinction:
+    - Agent errors: bugs/failures in the agent's own logic
+    - Infra errors: API provider issues (403, 429, timeouts) — NOT agent's fault
+    - Error rate only counts AGENT errors (fair to the agent)
+    - Infra health is reported separately
     """
     if not records:
         return {
             "total": 0,
+            "total_interactions": 0,
+            "infra_errors": 0,
+            "agent_errors": 0,
             "retried_rate": 0.0,
             "hedged_rate": 0.0,
             "incomplete_rate": 0.0,
             "high_latency_rate": 0.0,
             "error_rate": 0.0,
+            "infra_error_rate": 0.0,
             "human_review_rate": 0.0,
             "chain_integrity": 1.0,
             "avg_latency_ms": 0,
+            "reliability": 1.0,
+            "availability": 1.0,
         }
 
     total = len(records)
 
-    def _flag_count(flag: str) -> int:
-        return sum(1 for r in records if flag in (r.get("step", {}).get("flags") or []))
+    # Separate infra errors from agent work
+    infra_errors = sum(1 for r in records if r.get("metadata", {}).get("is_infra_error"))
+    agent_records = [r for r in records if not r.get("metadata", {}).get("is_infra_error")]
+    total_interactions = len(agent_records)
+
+    def _flag_count(flag: str, recs: "list[dict] | None" = None) -> int:
+        target = recs if recs is not None else records
+        return sum(1 for r in target if flag in (r.get("step", {}).get("flags") or []))
+
+    # Agent errors: error flag in non-infra records
+    agent_errors = _flag_count("error", agent_records)
 
     latencies = [
         r["step"]["latency_ms"]
-        for r in records
+        for r in agent_records
         if r.get("step", {}).get("latency_ms")
     ]
 
     chain_ok = _check_chain_integrity(records)
 
+    # Reliability: % of agent interactions without errors (excludes infra)
+    reliability = round((total_interactions - agent_errors) / total_interactions, 4) if total_interactions else 1.0
+    # Availability: % of all attempts that weren't infra failures
+    availability = round(total_interactions / total, 4) if total else 1.0
+
     return {
         "total": total,
-        "retried_rate": round(_flag_count("retried") / total, 4),
-        "hedged_rate": round(_flag_count("hedged") / total, 4),
-        "incomplete_rate": round(_flag_count("incomplete") / total, 4),
-        "high_latency_rate": round(_flag_count("high_latency") / total, 4),
-        "error_rate": round(_flag_count("error") / total, 4),
-        "human_review_rate": round(_flag_count("human_review") / total, 4),
+        "total_interactions": total_interactions,
+        "infra_errors": infra_errors,
+        "agent_errors": agent_errors,
+        "retried_rate": round(_flag_count("retried", agent_records) / total_interactions, 4) if total_interactions else 0.0,
+        "hedged_rate": round(_flag_count("hedged", agent_records) / total_interactions, 4) if total_interactions else 0.0,
+        "incomplete_rate": round(_flag_count("incomplete", agent_records) / total_interactions, 4) if total_interactions else 0.0,
+        "high_latency_rate": round(_flag_count("high_latency", agent_records) / total_interactions, 4) if total_interactions else 0.0,
+        "error_rate": round(agent_errors / total_interactions, 4) if total_interactions else 0.0,
+        "infra_error_rate": round(infra_errors / total, 4) if total else 0.0,
+        "human_review_rate": round(_flag_count("human_review", agent_records) / total_interactions, 4) if total_interactions else 0.0,
         "chain_integrity": 1.0 if chain_ok else 0.0,
         "avg_latency_ms": int(statistics.mean(latencies)) if latencies else 0,
+        "reliability": reliability,
+        "availability": availability,
     }
 
 

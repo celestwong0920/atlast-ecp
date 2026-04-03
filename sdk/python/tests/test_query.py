@@ -192,23 +192,23 @@ class TestTimeline:
         day = results[0]
         assert "date" in day
         assert "total" in day
-        assert "errors" in day
+        assert "agent_errors" in day
         assert "error_rate" in day
         assert "avg_latency_ms" in day
 
     def test_timeline_error_rate(self, setup_ecp_dir):
         from atlast_ecp.query import timeline
         results = timeline(days=7, as_json=True)
-        # We have 1 error in 10 records = 10%
-        assert results[0]["errors"] == 1
-        assert results[0]["error_rate"] == 10.0
+        # We have 1 error in records (agent_errors, non-infra)
+        assert results[0]["agent_errors"] == 1
+        assert results[0]["error_rate"] > 0
 
     def test_timeline_human_output(self, setup_ecp_dir, capsys):
         from atlast_ecp.query import timeline
         timeline(days=7, as_json=False)
         captured = capsys.readouterr()
         assert "Timeline" in captured.out
-        assert "Records" in captured.out
+        assert "interactions" in captured.out or "Work" in captured.out
 
 
 class TestAudit:

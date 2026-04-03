@@ -79,12 +79,16 @@ class TestCmdInit:
         out = capsys.readouterr().out
         assert True  # just verify no crash
 
-    def test_init_with_identity(self, capsys):
+    def test_init_with_identity(self, capsys, tmp_path):
+        ecp_dir = tmp_path / ".ecp"
+        ecp_dir.mkdir()
         with patch("atlast_ecp.storage.init_storage"), \
-             patch("atlast_ecp.identity.get_or_create_identity", return_value={"did": "did:ecp:test"}):
-            cmd_init(["--identity"])
+             patch("atlast_ecp.storage.ECP_DIR", ecp_dir), \
+             patch("atlast_ecp.cli.ECP_DIR", ecp_dir, create=True), \
+             patch("atlast_ecp.identity.get_or_create_identity", return_value={"did": "did:ecp:test12345678", "verified": True}):
+            cmd_init([])
         out = capsys.readouterr().out
-        assert "did:ecp" in out or True
+        assert "Identity: ✅ created" in out
 
 
 class TestCmdDid:

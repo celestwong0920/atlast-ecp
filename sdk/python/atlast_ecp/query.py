@@ -50,9 +50,30 @@ def _get_db() -> sqlite3.Connection:
             input_preview TEXT,
             output_preview TEXT,
             error INTEGER DEFAULT 0,
+            is_infra INTEGER DEFAULT 0,
+            error_type TEXT DEFAULT '',
+            tokens_in INTEGER DEFAULT 0,
+            tokens_out INTEGER DEFAULT 0,
             indexed_at INTEGER
         )
     """)
+    # Migrate: add columns if missing (for existing DBs)
+    try:
+        db.execute("ALTER TABLE records ADD COLUMN is_infra INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        db.execute("ALTER TABLE records ADD COLUMN error_type TEXT DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        db.execute("ALTER TABLE records ADD COLUMN tokens_in INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        db.execute("ALTER TABLE records ADD COLUMN tokens_out INTEGER DEFAULT 0")
+    except Exception:
+        pass
     db.execute("CREATE INDEX IF NOT EXISTS idx_records_ts ON records(ts)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_records_agent ON records(agent)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_records_session ON records(session_id)")
@@ -111,6 +132,8 @@ def rebuild_index(verbose: bool = False) -> int:
             date_str = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d") if ts else ""
 
             has_error = 1 if ("error" in flags or "exception" in flags or step.get("error")) else 0
+            is_infra = 1 if r.get("metadata", {}).get("is_infra_error") else 0
+            error_type = r.get("metadata", {}).get("error_type", "")
 
             try:
                 db.execute("""
@@ -118,8 +141,8 @@ def rebuild_index(verbose: bool = False) -> int:
                     (id, agent, ts, date, step_type, action, model, latency_ms,
                      confidence, session_id, delegation_id, delegation_depth,
                      chain_prev, chain_hash, flags, input_preview, output_preview,
-                     error, indexed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     error, is_infra, error_type, tokens_in, tokens_out, indexed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     record_id,
                     r.get("agent", ""),
@@ -139,6 +162,10 @@ def rebuild_index(verbose: bool = False) -> int:
                     input_preview,
                     output_preview,
                     has_error,
+                    is_infra,
+                    error_type,
+                    step.get("tokens_in", 0) or 0,
+                    step.get("tokens_out", 0) or 0,
                     now_ms,
                 ))
                 count += 1
@@ -155,6 +182,47 @@ def rebuild_index(verbose: bool = False) -> int:
     if verbose:
         print(f"Indexed {count} records")
     return count
+
+
+def list_agents(as_json: bool = False) -> list[dict]:
+    """List all agents found in the records with summary stats."""
+    _ensure_index()
+    db = _get_db()
+    rows = db.execute("""
+        SELECT agent,
+               COUNT(*) as total,
+               SUM(CASE WHEN is_infra = 0 THEN 1 ELSE 0 END) as interactions,
+               SUM(CASE WHEN error = 1 AND is_infra = 0 THEN 1 ELSE 0 END) as agent_errors,
+               SUM(CASE WHEN is_infra = 1 THEN 1 ELSE 0 END) as infra_errors,
+               MIN(date) as first_seen,
+               MAX(date) as last_seen,
+               AVG(CASE WHEN is_infra = 0 THEN latency_ms END) as avg_latency,
+               SUM(tokens_in) as tokens_in,
+               SUM(tokens_out) as tokens_out
+        FROM records
+        GROUP BY agent
+        ORDER BY total DESC
+    """).fetchall()
+    db.close()
+
+    agents = []
+    for row in rows:
+        interactions = row[2] or 0
+        agent_errors = row[3] or 0
+        agents.append({
+            "agent": row[0],
+            "total_records": row[1],
+            "interactions": interactions,
+            "agent_errors": agent_errors,
+            "infra_errors": row[4] or 0,
+            "reliability": round((interactions - agent_errors) / interactions, 4) if interactions else 1.0,
+            "first_seen": row[5],
+            "last_seen": row[6],
+            "avg_latency_ms": round(row[7] or 0),
+            "tokens_in": row[8] or 0,
+            "tokens_out": row[9] or 0,
+        })
+    return agents
 
 
 def _ensure_index():
@@ -369,10 +437,14 @@ def timeline(
     rows = db.execute(f"""
         SELECT date,
                COUNT(*) as total,
-               SUM(error) as errors,
-               AVG(latency_ms) as avg_latency,
+               SUM(CASE WHEN error = 1 AND is_infra = 0 THEN 1 ELSE 0 END) as agent_errors,
+               SUM(CASE WHEN is_infra = 1 THEN 1 ELSE 0 END) as infra_errors,
+               AVG(CASE WHEN is_infra = 0 THEN latency_ms END) as avg_latency,
                AVG(confidence) as avg_confidence,
-               COUNT(DISTINCT session_id) as sessions
+               COUNT(DISTINCT session_id) as sessions,
+               SUM(CASE WHEN is_infra = 0 THEN 1 ELSE 0 END) as interactions,
+               SUM(tokens_in) as total_tokens_in,
+               SUM(tokens_out) as total_tokens_out
         FROM records
         WHERE date >= ? AND date <= ? {agent_cond}
         GROUP BY date
@@ -381,14 +453,22 @@ def timeline(
 
     results = []
     for row in rows:
+        interactions = row[7] or 0
+        agent_errors = row[2] or 0
+        infra_errors = row[3] or 0
         results.append({
             "date": row[0],
             "total": row[1],
-            "errors": row[2] or 0,
-            "error_rate": round((row[2] or 0) / row[1] * 100, 1) if row[1] else 0,
-            "avg_latency_ms": round(row[3] or 0),
-            "avg_confidence": round(row[4], 3) if row[4] is not None else None,
-            "sessions": row[5] or 0,
+            "interactions": interactions,
+            "agent_errors": agent_errors,
+            "infra_errors": infra_errors,
+            "error_rate": round(agent_errors / interactions * 100, 1) if interactions else 0,
+            "infra_error_rate": round(infra_errors / row[1] * 100, 1) if row[1] else 0,
+            "avg_latency_ms": round(row[4] or 0),
+            "avg_confidence": round(row[5], 3) if row[5] is not None else None,
+            "sessions": row[6] or 0,
+            "tokens_in": row[8] or 0,
+            "tokens_out": row[9] or 0,
         })
 
     db.close()
@@ -405,18 +485,17 @@ def _print_timeline(results: list[dict], since: str, until: str):
         return
 
     print(f"\n📅 Timeline: {since} → {until}\n")
-    print(f"  {'Date':<12} {'Records':>8} {'Errors':>8} {'Err%':>6} {'Latency':>10} {'Sessions':>9}")
-    print(f"  {'─'*12} {'─'*8} {'─'*8} {'─'*6} {'─'*10} {'─'*9}")
+    print(f"  {'Date':<12} {'Work':>8} {'AgErr':>8} {'Infra':>8} {'Err%':>6} {'Latency':>10} {'Sessions':>9}")
+    print(f"  {'─'*12} {'─'*8} {'─'*8} {'─'*8} {'─'*6} {'─'*10} {'─'*9}")
 
     for d in results:
-        "⚠️ " if d["error_rate"] > 10 else "  "
-        f"{d['avg_confidence']:.2f}" if d.get("avg_confidence") is not None else "  -"
-        print(f"  {d['date']:<12} {d['total']:>8} {d['errors']:>8} {d['error_rate']:>5.1f}% {d['avg_latency_ms']:>8}ms {d['sessions']:>9}")
+        print(f"  {d['date']:<12} {d.get('interactions',d['total']):>8} {d.get('agent_errors',0):>8} {d.get('infra_errors',0):>8} {d['error_rate']:>5.1f}% {d['avg_latency_ms']:>8}ms {d['sessions']:>9}")
 
-    total_records = sum(d["total"] for d in results)
-    total_errors = sum(d["errors"] for d in results)
-    avg_rate = round(total_errors / total_records * 100, 1) if total_records else 0
-    print(f"\n  Total: {total_records} records, {total_errors} errors ({avg_rate}%), {len(results)} active days\n")
+    total_interactions = sum(d.get("interactions", d["total"]) for d in results)
+    total_agent_errors = sum(d.get("agent_errors", 0) for d in results)
+    total_infra = sum(d.get("infra_errors", 0) for d in results)
+    avg_rate = round(total_agent_errors / total_interactions * 100, 1) if total_interactions else 0
+    print(f"\n  Total: {total_interactions} interactions, {total_agent_errors} agent errors ({avg_rate}%), {total_infra} infra errors, {len(results)} active days\n")
 
 
 # ── Audit ───────────────────────────────────────────────────────────────────

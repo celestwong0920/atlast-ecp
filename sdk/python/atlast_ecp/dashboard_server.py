@@ -11,6 +11,7 @@ import json
 import os
 import threading
 import webbrowser
+from datetime import datetime, timezone, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -80,7 +81,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json_response(500, {"error": str(e)})
 
     def _dispatch_api(self, path: str, params: dict) -> dict:
-        from .query import search, trace, audit, timeline, rebuild_index
+        from .query import search, trace, audit, timeline, rebuild_index, list_agents
+
+        # ── Agents: list all agents with stats ──
+        if path == "/api/agents":
+            agents = list_agents(as_json=True)
+            return {"agents": agents, "count": len(agents)}
 
         # ── Vault: raw input/output for a record ──
         if path.startswith("/api/vault/"):
@@ -134,22 +140,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "vault_files_count": vault_count,
                     "explanation": "Records contain hashed metadata (no raw content). Vault stores the original input/output locally."
                 },
-                "how_to_use": {
-                    "step_1": "📊 Stats — See total records, reliability score, chain integrity",
-                    "step_2": "📅 Timeline — View daily activity trends (records per day, error rates)",
-                    "step_3": "🔍 Search — Find specific records by type, model, or flags",
-                    "step_4": "🔗 Trace — Click any record to see its full chain (each record links to the previous one)",
-                    "step_5": "📋 Audit — Get a 30-day health report of your agent's behavior",
-                    "step_6": "👁️ Vault — Click a record to see the original AI input/output (stored locally, never uploaded)"
-                },
-                "cli_commands": {
-                    "atlast stats": "View trust signals summary",
-                    "atlast log": "See latest records",
-                    "atlast timeline": "Daily activity breakdown",
-                    "atlast push": "Upload records to server for on-chain anchoring",
-                    "atlast verify": "Verify a record's chain integrity",
-                    "atlast export": "Export all records as JSON"
-                },
                 "privacy": "All data stays on your machine. The vault (raw AI conversations) never leaves your device unless you explicitly push."
             }
 
@@ -157,6 +147,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             query = params.get("q", [""])[0]
             limit = int(params.get("limit", ["20"])[0])
             errors_only = params.get("errors", [""])[0] == "1"
+            infra_only = params.get("infra", [""])[0] == "1"
             agent = params.get("agent", [None])[0]
             since = params.get("since", [None])[0]
             until = params.get("until", [None])[0]
@@ -188,32 +179,309 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return {"indexed": count}
 
         elif path == "/api/stats":
-            from .storage import count_records, ECP_DIR, RECORDS_DIR, VAULT_DIR
-            from .identity import get_or_create_identity
-            try:
-                identity = get_or_create_identity()
-                did = identity.get("did", "unknown")
-            except Exception:
-                did = "not initialized"
-            # Count vault files
-            vault_count = 0
-            if VAULT_DIR.exists():
-                vault_count = len(list(VAULT_DIR.iterdir()))
-            # Count record files for session approximation
-            record_files = []
-            if RECORDS_DIR.exists():
-                record_files = sorted(RECORDS_DIR.glob("*.jsonl"))
+            agent = params.get("agent", [None])[0]
+            return self._get_stats(agent=agent)
+
+        elif path == "/api/overview":
+            """High-level dashboard overview with all key metrics."""
+            agent = params.get("agent", [None])[0]
+            stats = self._get_stats(agent=agent)
+            timeline_data = timeline(days=30, agent=agent, as_json=True)
+            agents = list_agents(as_json=True)
+            audit_data = audit(days=30, agent=agent, as_json=True)
+
+            # Compute cost estimation (approximate pricing per model)
+            MODEL_PRICING = {
+                # price per 1M tokens: (input, output)
+                "claude-sonnet-4-6": (3.0, 15.0),
+                "claude-opus-4-6": (15.0, 75.0),
+                "claude-haiku-3-5": (0.25, 1.25),
+                "gpt-4o": (2.5, 10.0),
+                "gpt-4o-mini": (0.15, 0.6),
+                "gpt-4.1": (2.0, 8.0),
+            }
+            total_cost = 0.0
+            for a in agents:
+                # Estimate cost based on model (best effort)
+                model = ""  # Would need per-agent model breakdown
+                ti = a.get("tokens_in", 0)
+                to_ = a.get("tokens_out", 0)
+                # Use default pricing
+                total_cost += (ti / 1_000_000 * 3.0) + (to_ / 1_000_000 * 15.0)
+
             return {
-                "total_records": count_records(),
-                "agent_did": did,
-                "ecp_dir": str(ECP_DIR),
-                "vault_count": vault_count,
-                "record_files": [f.name for f in record_files],
-                "active_days": len(record_files),
-                "has_vault": vault_count > 0,
+                "stats": stats,
+                "timeline": timeline_data,
+                "agents": agents,
+                "audit_health": audit_data.get("health", "unknown"),
+                "audit_anomalies": len(audit_data.get("anomalies", [])),
+                "estimated_cost_usd": round(total_cost, 4),
             }
 
+        elif path == "/api/records":
+            """Paginated records list with filtering."""
+            agent = params.get("agent", [None])[0]
+            limit = int(params.get("limit", ["50"])[0])
+            offset = int(params.get("offset", ["0"])[0])
+            since = params.get("since", [None])[0]
+            until = params.get("until", [None])[0]
+            exclude_infra = params.get("exclude_infra", [""])[0] == "1"
+
+            from .query import _ensure_index, _get_db
+            _ensure_index()
+            db = _get_db()
+            conditions = []
+            p = []
+            if agent:
+                conditions.append("agent = ?")
+                p.append(agent)
+            if since:
+                conditions.append("date >= ?")
+                p.append(since)
+            if until:
+                conditions.append("date <= ?")
+                p.append(until)
+            if exclude_infra:
+                conditions.append("is_infra = 0")
+            where = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+            total_count = db.execute(f"SELECT COUNT(*) FROM records {where}", p).fetchone()[0]
+            rows = db.execute(
+                f"SELECT * FROM records {where} ORDER BY ts DESC LIMIT ? OFFSET ?",
+                p + [limit, offset]
+            ).fetchall()
+            db.close()
+            return {
+                "records": [dict(r) for r in rows],
+                "total": total_count,
+                "limit": limit,
+                "offset": offset,
+            }
+
+        elif path == "/api/models":
+            """Model usage breakdown."""
+            agent = params.get("agent", [None])[0]
+            from .query import _ensure_index, _get_db
+            _ensure_index()
+            db = _get_db()
+            cond = "WHERE is_infra = 0"
+            p = []
+            if agent:
+                cond += " AND agent = ?"
+                p.append(agent)
+            rows = db.execute(f"""
+                SELECT model,
+                       COUNT(*) as count,
+                       AVG(latency_ms) as avg_latency,
+                       SUM(tokens_in) as tokens_in,
+                       SUM(tokens_out) as tokens_out
+                FROM records {cond}
+                GROUP BY model ORDER BY count DESC
+            """, p).fetchall()
+            db.close()
+            return {"models": [dict(r) for r in rows]}
+
+        elif path == "/api/tools":
+            """Tool usage analysis from output content."""
+            agent = params.get("agent", [None])[0]
+            from .query import _ensure_index, _get_db
+            _ensure_index()
+            db = _get_db()
+            cond = "WHERE is_infra = 0 AND output_preview LIKE '%tools:%'"
+            p = []
+            if agent:
+                cond += " AND agent = ?"
+                p.append(agent)
+            rows = db.execute(f"""
+                SELECT output_preview FROM records {cond}
+            """, p).fetchall()
+            db.close()
+
+            # Parse tool names from output previews
+            from collections import Counter
+            tool_counter = Counter()
+            for row in rows:
+                preview = row[0] or ""
+                import re
+                match = re.search(r'\[tools:\s*([^\]]+)\]', preview)
+                if match:
+                    tools = [t.strip() for t in match.group(1).split(",")]
+                    for t in tools:
+                        if t:
+                            tool_counter[t] += 1
+            return {"tools": [{"name": k, "count": v} for k, v in tool_counter.most_common(50)]}
+
+        elif path == "/api/flags":
+            """Flag distribution analysis."""
+            agent = params.get("agent", [None])[0]
+            from .query import _ensure_index, _get_db
+            _ensure_index()
+            db = _get_db()
+            cond = "WHERE is_infra = 0"
+            p = []
+            if agent:
+                cond += " AND agent = ?"
+                p.append(agent)
+            rows = db.execute(f"SELECT flags FROM records {cond}", p).fetchall()
+            db.close()
+            from collections import Counter
+            flag_counter = Counter()
+            total = 0
+            for row in rows:
+                total += 1
+                flags = json.loads(row[0] or "[]")
+                for f in flags:
+                    flag_counter[f] += 1
+            return {
+                "flags": [{"name": k, "count": v, "rate": round(v/total*100, 1) if total else 0}
+                         for k, v in flag_counter.most_common()],
+                "total_records": total,
+            }
+
+        elif path == "/api/sessions":
+            """Session breakdown."""
+            agent = params.get("agent", [None])[0]
+            from .query import _ensure_index, _get_db
+            _ensure_index()
+            db = _get_db()
+            cond = "WHERE is_infra = 0 AND session_id != ''"
+            p = []
+            if agent:
+                cond += " AND agent = ?"
+                p.append(agent)
+            rows = db.execute(f"""
+                SELECT session_id,
+                       COUNT(*) as count,
+                       MIN(ts) as first_ts,
+                       MAX(ts) as last_ts,
+                       AVG(latency_ms) as avg_latency,
+                       SUM(tokens_in) as tokens_in,
+                       SUM(tokens_out) as tokens_out
+                FROM records {cond}
+                GROUP BY session_id ORDER BY last_ts DESC LIMIT 50
+            """, p).fetchall()
+            db.close()
+            return {"sessions": [dict(r) for r in rows]}
+
+        elif path == "/api/hourly":
+            """Hourly activity heatmap data."""
+            agent = params.get("agent", [None])[0]
+            days = int(params.get("days", ["30"])[0])
+            from .query import _ensure_index, _get_db
+            _ensure_index()
+            db = _get_db()
+            since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+            cond = "WHERE is_infra = 0 AND date >= ?"
+            p = [since]
+            if agent:
+                cond += " AND agent = ?"
+                p.append(agent)
+            rows = db.execute(f"""
+                SELECT ts FROM records {cond}
+            """, p).fetchall()
+            db.close()
+            # Build hourly heatmap: day_of_week x hour
+            heatmap = [[0]*24 for _ in range(7)]
+            for row in rows:
+                ts = row[0]
+                if ts:
+                    dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+                    heatmap[dt.weekday()][dt.hour] += 1
+            return {"heatmap": heatmap, "days": ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]}
+
         return {"error": f"Unknown API: {path}"}
+
+    def _get_stats(self, agent: "str | None" = None) -> dict:
+        """Comprehensive stats with proper infra/agent separation."""
+        from .storage import count_records, ECP_DIR, RECORDS_DIR, VAULT_DIR
+        from .identity import get_or_create_identity
+        from .query import _ensure_index, _get_db, list_agents
+
+        try:
+            identity = get_or_create_identity()
+            did = identity.get("did", "unknown")
+        except Exception:
+            did = "not initialized"
+
+        _ensure_index()
+        db = _get_db()
+
+        cond = ""
+        p = []
+        if agent:
+            cond = "WHERE agent = ?"
+            p = [agent]
+
+        # Core metrics
+        row = db.execute(f"""
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN is_infra = 0 THEN 1 ELSE 0 END) as interactions,
+                   SUM(CASE WHEN error = 1 AND is_infra = 0 THEN 1 ELSE 0 END) as agent_errors,
+                   SUM(CASE WHEN is_infra = 1 THEN 1 ELSE 0 END) as infra_errors,
+                   AVG(CASE WHEN is_infra = 0 THEN latency_ms END) as avg_latency,
+                   SUM(tokens_in) as tokens_in,
+                   SUM(tokens_out) as tokens_out,
+                   MIN(date) as first_date,
+                   MAX(date) as last_date,
+                   COUNT(DISTINCT date) as active_days,
+                   COUNT(DISTINCT session_id) as sessions,
+                   COUNT(DISTINCT model) as models_used
+            FROM records {cond}
+        """, p).fetchone()
+
+        total = row[0] or 0
+        interactions = row[1] or 0
+        agent_errors = row[2] or 0
+        infra_errors = row[3] or 0
+        tokens_in = row[5] or 0
+        tokens_out = row[6] or 0
+
+        # Chain integrity check
+        chain_ok = True
+        chain_records = db.execute(f"""
+            SELECT id, chain_prev, chain_hash FROM records
+            {cond} {'AND' if cond else 'WHERE'} chain_prev != ''
+            ORDER BY ts
+        """.replace("WHERE AND", "WHERE"), p).fetchall()
+        if chain_records:
+            id_set = set(r[0] for r in chain_records)
+            broken = sum(1 for r in chain_records if r[1] != "genesis" and r[1] not in id_set)
+            chain_ok = broken == 0
+
+        db.close()
+
+        vault_count = 0
+        if VAULT_DIR.exists():
+            vault_count = len(list(VAULT_DIR.iterdir()))
+
+        record_files = sorted(RECORDS_DIR.glob("*.jsonl")) if RECORDS_DIR.exists() else []
+
+        reliability = round((interactions - agent_errors) / interactions, 4) if interactions else 1.0
+        availability = round(interactions / total, 4) if total else 1.0
+
+        return {
+            "total_records": total,
+            "total_interactions": interactions,
+            "agent_errors": agent_errors,
+            "infra_errors": infra_errors,
+            "reliability": reliability,
+            "availability": availability,
+            "chain_integrity": 1.0 if chain_ok else 0.0,
+            "avg_latency_ms": round(row[4] or 0),
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "estimated_cost_usd": round((tokens_in / 1_000_000 * 3.0) + (tokens_out / 1_000_000 * 15.0), 4),
+            "first_date": row[7],
+            "last_date": row[8],
+            "active_days": row[9] or 0,
+            "sessions": row[10] or 0,
+            "models_used": row[11] or 0,
+            "agent_did": did,
+            "ecp_dir": str(ECP_DIR),
+            "vault_count": vault_count,
+            "record_files": [f.name for f in record_files],
+            "has_vault": vault_count > 0,
+        }
 
     def _json_response(self, status: int, data: dict):
         body = json.dumps(data, default=str, ensure_ascii=False).encode("utf-8")

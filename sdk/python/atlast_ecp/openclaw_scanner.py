@@ -104,22 +104,38 @@ def scan_session_file(jsonl_path: str, since_ts: Optional[str] = None) -> list[d
                 has_tools = bool(tool_calls)
                 is_error = bool(msg.get("errorMessage"))
 
-                # Record error responses too — users need to know their agent failed
+                # Classify error responses: infra vs agent
                 if is_error and not has_text and not has_tools:
                     err_msg = msg.get("errorMessage", "")
-                    # Extract error type
-                    err_type = "error"
-                    if "overloaded" in err_msg.lower():
-                        err_type = "api_overloaded"
-                    elif "permission" in err_msg.lower() or "403" in err_msg:
-                        err_type = "auth_error"
-                    elif "abort" in err_msg.lower():
-                        err_type = "aborted"
-                    
+                    err_lower = err_msg.lower()
+
+                    # Infrastructure errors: API provider issues, NOT agent's fault
+                    is_infra = any(k in err_lower for k in (
+                        "overloaded", "permission", "403", "429", "500",
+                        "502", "503", "504", "rate limit", "quota",
+                        "oauth", "token", "revoked", "expired", "timeout",
+                        "connection", "abort", "ECONNREFUSED".lower(),
+                        "service unavailable", "internal server error",
+                    ))
+
+                    err_type = "infra_error" if is_infra else "agent_error"
+                    # Sub-classify infra errors
+                    if is_infra:
+                        if "overloaded" in err_lower:
+                            err_type = "infra_overloaded"
+                        elif any(k in err_lower for k in ("permission", "403", "oauth", "revoked", "expired")):
+                            err_type = "infra_auth"
+                        elif any(k in err_lower for k in ("rate limit", "429", "quota")):
+                            err_type = "infra_rate_limit"
+                        elif "abort" in err_lower:
+                            err_type = "infra_aborted"
+                        else:
+                            err_type = "infra_error"
+
                     # Only record the FIRST error per user message (not all retries)
                     interaction = {
                         "input": pending_user["content"],
-                        "output": f"[ERROR: {err_type}] {err_msg[:200]}",
+                        "output": f"[{err_type.upper()}] {err_msg[:200]}",
                         "timestamp": ts,
                         "input_ts": pending_user["timestamp"],
                         "model": msg.get("model", ""),
@@ -127,6 +143,8 @@ def scan_session_file(jsonl_path: str, since_ts: Optional[str] = None) -> list[d
                         "tokens_out": 0,
                         "has_tool_calls": False,
                         "is_error": True,
+                        "is_infra_error": is_infra,
+                        "error_type": err_type,
                     }
                     interactions.append(interaction)
                     pending_user = None  # Consume the user message, don't record more retries
@@ -267,6 +285,15 @@ def scan_openclaw_agent(
                 total_skipped += 1
                 continue
 
+            # Build metadata for error classification
+            meta = {}
+            if ix.get("is_infra_error"):
+                meta["is_infra_error"] = True
+                meta["error_type"] = ix.get("error_type", "infra_error")
+            elif ix.get("is_error"):
+                meta["is_error"] = True
+                meta["error_type"] = ix.get("error_type", "agent_error")
+
             rid = record(
                 input_content=ix["input"],
                 output_content=ix["output"],
@@ -275,6 +302,7 @@ def scan_openclaw_agent(
                 tokens_out=ix.get("tokens_out", 0),
                 latency_ms=ix.get("latency_ms", 0),
                 has_tool_calls=ix.get("has_tool_calls", False),
+                metadata=meta if meta else None,
             )
             if rid:
                 total_new += 1
