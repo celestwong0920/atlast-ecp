@@ -607,6 +607,21 @@ def cmd_init(args: list[str]):
         except Exception:
             print("  Server: 📁 offline mode (records saved locally, sync later with: atlast register)")
 
+        # Auto-setup scanner service for OpenClaw agents
+        try:
+            from .scanner_service import setup_scanner_service, detect_openclaw_agents
+            agents = detect_openclaw_agents()
+            if agents:
+                result = setup_scanner_service()
+                if result["status"] == "ok":
+                    names = ", ".join(result["agents"])
+                    print(f"  Auto-record: ✅ watching {result['agent_count']} agent(s) ({names})")
+                else:
+                    print(f"  Auto-record: ⚠️ could not start scanner service")
+            # No message if no agents found — not every user uses OpenClaw
+        except Exception:
+            pass  # Non-critical, fail silently
+
         print("\n  ✅ All set! Your agent's work is now being recorded.")
         print("     Use your agent normally — evidence is captured automatically.")
     else:
@@ -1647,6 +1662,31 @@ def cmd_doctor(args: list[str]):
             if free_gb < 0.1:
                 issues.append("Disk almost full — free up space")
                 all_ok = False
+    except Exception:
+        pass
+
+    # 9. Scanner service
+    try:
+        from .scanner_service import get_scanner_status, detect_openclaw_agents, setup_scanner_service
+        agents = detect_openclaw_agents()
+        if agents:
+            status = get_scanner_status()
+            if status["running"]:
+                print(f"  ✅ Scanner: running ({status['method']}, {len(agents)} agent(s))")
+            else:
+                if "--fix" in args:
+                    result = setup_scanner_service()
+                    if result["status"] == "ok":
+                        print(f"  ✅ Scanner: started ({result['method']}, {len(agents)} agent(s))")
+                        fixed.append("Started scanner service")
+                    else:
+                        print(f"  ❌ Scanner: not running — could not auto-start")
+                        issues.append("Scanner service failed to start")
+                        all_ok = False
+                else:
+                    print(f"  ⚠️  Scanner: not running ({len(agents)} OpenClaw agent(s) found)")
+                    issues.append("Scanner not running — agent conversations not being recorded")
+                    all_ok = False
     except Exception:
         pass
 

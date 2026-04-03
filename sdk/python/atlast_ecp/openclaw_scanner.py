@@ -104,9 +104,32 @@ def scan_session_file(jsonl_path: str, since_ts: Optional[str] = None) -> list[d
                 has_tools = bool(tool_calls)
                 is_error = bool(msg.get("errorMessage"))
 
-                # Skip error-only responses (403, terminated, etc.)
+                # Record error responses too — users need to know their agent failed
                 if is_error and not has_text and not has_tools:
-                    pending_user = None
+                    err_msg = msg.get("errorMessage", "")
+                    # Extract error type
+                    err_type = "error"
+                    if "overloaded" in err_msg.lower():
+                        err_type = "api_overloaded"
+                    elif "permission" in err_msg.lower() or "403" in err_msg:
+                        err_type = "auth_error"
+                    elif "abort" in err_msg.lower():
+                        err_type = "aborted"
+                    
+                    # Only record the FIRST error per user message (not all retries)
+                    interaction = {
+                        "input": pending_user["content"],
+                        "output": f"[ERROR: {err_type}] {err_msg[:200]}",
+                        "timestamp": ts,
+                        "input_ts": pending_user["timestamp"],
+                        "model": msg.get("model", ""),
+                        "tokens_in": 0,
+                        "tokens_out": 0,
+                        "has_tool_calls": False,
+                        "is_error": True,
+                    }
+                    interactions.append(interaction)
+                    pending_user = None  # Consume the user message, don't record more retries
                     continue
 
                 # Extract model directly from assistant message
@@ -213,6 +236,21 @@ def scan_openclaw_agent(
     total_new = 0
     total_skipped = 0
 
+    # Build set of existing record hashes to prevent duplicates
+    from .storage import RECORDS_DIR
+    existing_hashes = set()
+    if RECORDS_DIR.exists():
+        for rf in RECORDS_DIR.glob("*.jsonl"):
+            try:
+                for line in rf.read_text().strip().split("\n"):
+                    if line.strip():
+                        rec = json.loads(line)
+                        ih = rec.get("step", {}).get("in_hash", "")
+                        if ih:
+                            existing_hashes.add(ih)
+            except Exception:
+                pass
+
     for jsonl_file in sorted(sessions_dir.glob("*.jsonl")):
         file_key = jsonl_file.name
         last_ts = state.get(file_key, since_ts)
@@ -222,6 +260,13 @@ def scan_openclaw_agent(
             continue
 
         for ix in interactions:
+            # Dedup: check if this input was already recorded
+            from .record import hash_content
+            in_hash = hash_content(ix["input"])
+            if in_hash in existing_hashes:
+                total_skipped += 1
+                continue
+
             rid = record(
                 input_content=ix["input"],
                 output_content=ix["output"],
@@ -233,6 +278,7 @@ def scan_openclaw_agent(
             )
             if rid:
                 total_new += 1
+                existing_hashes.add(in_hash)
             else:
                 total_skipped += 1
 
