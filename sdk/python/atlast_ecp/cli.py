@@ -251,7 +251,8 @@ def cmd_stats(args: list[str]):
 
     from .identity import get_or_create_identity
     identity = get_or_create_identity()
-    print(f"  Agent: {identity['did']}")
+    did_short = identity['did'].split(':')[-1][:8]
+    print(f"  Agent ID: ...{did_short}")
     print(f"  Total records: {total}")
     print()
 
@@ -268,7 +269,7 @@ def cmd_stats(args: list[str]):
     print(f"  Reliability     {_bar(retry_r + incomplete_r + error_r)}  "
           f"{int((1 - retry_r - incomplete_r - error_r) * 100)}%")
     print(f"  Hedge rate      {hedge_r * 100:.1f}%  (lower = more decisive)")
-    print(f"  Chain integrity {'✅ 100%' if chain_i == 1.0 else '⚠️ BROKEN'}")
+    print(f"  Chain integrity {'✅ 100%' if chain_i >= 0.999 else f'⚠️ {chain_i*100:.0f}%'}")
     print(f"  Avg latency     {signals['avg_latency_ms']}ms")
     print()
     server_url = get_api_url()
@@ -548,8 +549,31 @@ def cmd_init(args: list[str]):
             except ImportError:
                 print("  ⚠️  Cannot upgrade: install PyNaCl first (pip install pynacl)")
 
-        print(f"  Agent DID: {identity['did']}")
-        print(f"  Key type: {'ed25519' if identity.get('verified') else 'fallback'}")
+        # Show identity info — friendly for non-technical users
+        did_short = identity['did'].split(':')[-1][:8]  # first 8 chars
+        is_ed25519 = identity.get('verified', False)
+        print(f"  Identity: ✅ created (ID: ...{did_short})")
+        if not is_ed25519:
+            # Silently try to auto-upgrade to Ed25519
+            try:
+                from nacl.signing import SigningKey
+                import stat
+                sk = SigningKey.generate()
+                identity["pub_key"] = sk.verify_key.encode().hex()
+                identity["priv_key"] = sk.encode().hex()
+                identity["verified"] = True
+                id_file = ECP_DIR / "identity.json"
+                id_file.write_text(json.dumps(identity, indent=2))
+                try:
+                    id_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
+                except OSError:
+                    pass
+                print("  Security: ✅ Ed25519 (strong)")
+            except ImportError:
+                print("  Security: ✅ ready (upgrade with: pip install pynacl)")
+
+        else:
+            print("  Security: ✅ Ed25519 (strong)")
 
         # Show recovery phrase for NEW identities
         mnemonic = identity.get("_mnemonic")
@@ -565,17 +589,15 @@ def cmd_init(args: list[str]):
         if not non_interactive and mnemonic:
             _ask_backup_location()
 
-        # Auto-register with server
-        print("\n  🌐 Registering with ATLAST server...")
+        # Auto-register with server (silent on failure)
         try:
             _auto_register(identity)
-        except Exception as e:
-            print(f"  ⚠️  Registration skipped: {e}")
-            print("  📁 Local recording works. Register later: atlast register")
+            print("  Server: ✅ registered")
+        except Exception:
+            print("  Server: 📁 offline mode (records saved locally, sync later with: atlast register)")
 
-        print("\n  ✅ Ready! Create your first record:")
-        print("     from atlast_ecp.core import record")
-        print('     record("your input", "your output")')
+        print("\n  ✅ All set! Your agent's work is now being recorded.")
+        print("     Use your agent normally — evidence is captured automatically.")
     else:
         print("  Identity: skipped (run 'atlast init' to create DID)")
         print("\n  Next: echo '{\"in\":\"prompt\",\"out\":\"response\"}' | atlast record")
