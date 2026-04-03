@@ -132,8 +132,26 @@ def rebuild_index(verbose: bool = False) -> int:
             date_str = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d") if ts else ""
 
             has_error = 1 if ("error" in flags or "exception" in flags or step.get("error")) else 0
-            is_infra = 1 if r.get("metadata", {}).get("is_infra_error") else 0
-            error_type = r.get("metadata", {}).get("error_type", "")
+
+            # Detect infra errors: from metadata (new records) or output content (old records)
+            metadata = r.get("metadata", {})
+            is_infra = 1 if metadata.get("is_infra_error") else 0
+            error_type = metadata.get("error_type", "")
+
+            # Retroactive detection for old records without metadata
+            if has_error and not is_infra and not error_type:
+                out_text = (output_preview or "").lower()
+                infra_keywords = ("permission_error", "oauth", "revoked", "overloaded",
+                                  "rate limit", "429", "503", "500", "connection",
+                                  "infra_auth", "infra_error", "infra_overloaded",
+                                  "infra_rate_limit", "infra_aborted",
+                                  "[error: auth_error]", "[error: api_overloaded]",
+                                  "[error: aborted]", "403")
+                if any(k in out_text for k in infra_keywords):
+                    is_infra = 1
+                    error_type = "infra_error"
+                # Note: 0 tokens + error alone is NOT enough to classify as infra
+                # (agent errors can also have 0 tokens if they crash before LLM call)
 
             try:
                 db.execute("""
