@@ -82,7 +82,7 @@ class TestScanSessionFile:
             warnings.simplefilter("ignore")
             result = scan_session_file(str(f))
         assert "Sure" in result[0]["output"]
-        assert "[tool:bash]" in result[0]["output"]
+        assert "tools:" in result[0]["output"] and "bash" in result[0]["output"]
 
     def test_cache_ttl_attaches_model(self, tmp_path):
         """custom openclaw.cache-ttl entries attach model to last interaction."""
@@ -102,14 +102,14 @@ class TestScanSessionFile:
         assert result[0]["model"] == "claude-sonnet-4-6"
 
     def test_usage_data_attaches_tokens(self, tmp_path):
-        """custom entries with usage data attach token counts."""
+        """Token usage extracted from assistant message metadata."""
         f = tmp_path / "session.jsonl"
         _write_jsonl(f, [
             {"type": "message", "timestamp": "2024-01-01T10:00:00Z",
              "message": {"role": "user", "content": "Q"}},
             {"type": "message", "timestamp": "2024-01-01T10:00:01Z",
-             "message": {"role": "assistant", "content": "A"}},
-            {"type": "custom", "data": {"usage": {"input_tokens": 10, "output_tokens": 20}}},
+             "message": {"role": "assistant", "content": "A",
+                         "usage": {"input": 10, "output": 20}}},
         ])
         from atlast_ecp.openclaw_scanner import scan_session_file
         with warnings.catch_warnings():
