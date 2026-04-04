@@ -80,12 +80,31 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._json_response(500, {"error": str(e)})
 
+    def _resolve_agent_name(self, name: str) -> str:
+        """Convert a friendly agent name to its DID, or return as-is if already a DID."""
+        if not name or name.startswith("did:"):
+            return name
+        from .query import _build_did_name_map
+        did_map = _build_did_name_map()
+        # Reverse: name → DID
+        for did, n in did_map.items():
+            if n == name:
+                return did
+        return name  # fallback: return as-is
+
     def _dispatch_api(self, path: str, params: dict) -> dict:
         from .query import search, trace, audit, timeline, rebuild_index, list_agents
 
         # ── Agents: list all agents with stats ──
         if path == "/api/agents":
             agents = list_agents(as_json=True)
+            # Inject friendly names: keep DID in agent_did, show name in agent
+            for a in agents:
+                did = a.get("agent", "")
+                name = a.get("agent_name", "")
+                if name and name != did:
+                    a["agent_did"] = did
+                    a["agent"] = name
             return {"agents": agents, "count": len(agents)}
 
         # ── Vault: raw input/output for a record ──
@@ -149,6 +168,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             errors_only = params.get("errors", [""])[0] == "1"
             infra_only = params.get("infra", [""])[0] == "1"
             agent = params.get("agent", [None])[0]
+            if agent:
+                agent = self._resolve_agent_name(agent)
             since = params.get("since", [None])[0]
             until = params.get("until", [None])[0]
             results = search(query, limit=limit, agent=agent, since=since,
@@ -777,10 +798,10 @@ body.guide-dismissed { padding-top: 0 !important; }
 </script>'''
 
 
-def start_dashboard(port: int = DEFAULT_PORT, open_browser: bool = True):
+def start_dashboard(port: int = DEFAULT_PORT, open_browser: bool = True, host: str = "127.0.0.1"):
     """Start the local dashboard server."""
-    server = HTTPServer(("127.0.0.1", port), DashboardHandler)
-    url = f"http://127.0.0.1:{port}"
+    server = HTTPServer((host, port), DashboardHandler)
+    url = f"http://{host}:{port}"
 
     print("\n  📊 ATLAST ECP Dashboard")
     print(f"  Running at: {url}")

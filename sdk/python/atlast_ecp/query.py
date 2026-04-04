@@ -209,6 +209,27 @@ def rebuild_index(verbose: bool = False) -> int:
     return count
 
 
+def _build_did_name_map() -> dict[str, str]:
+    """Build a mapping from DID → friendly agent name using identity.json files."""
+    from .storage import ECP_DIR
+    import json as _json
+    agents_dir = ECP_DIR / "agents"
+    did_map: dict[str, str] = {}
+    if agents_dir.is_dir():
+        for agent_dir in agents_dir.iterdir():
+            if agent_dir.is_dir():
+                identity_file = agent_dir / "identity.json"
+                if identity_file.exists():
+                    try:
+                        identity = _json.loads(identity_file.read_text())
+                        did = identity.get("did", "")
+                        if did:
+                            did_map[did] = agent_dir.name
+                    except Exception:
+                        pass
+    return did_map
+
+
 def list_agents(as_json: bool = False) -> list[dict]:
     """List all agents found in the records with summary stats."""
     _ensure_index()
@@ -230,12 +251,16 @@ def list_agents(as_json: bool = False) -> list[dict]:
     """).fetchall()
     db.close()
 
+    did_map = _build_did_name_map()
+
     agents = []
     for row in rows:
         interactions = row[2] or 0
         agent_errors = row[3] or 0
+        did = row[0]
         agents.append({
-            "agent": row[0],
+            "agent": did,
+            "agent_name": did_map.get(did, did.split(":")[-1][:12] if did else "unknown"),
             "total_records": row[1],
             "interactions": interactions,
             "agent_errors": agent_errors,

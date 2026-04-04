@@ -1710,13 +1710,17 @@ def cmd_doctor(args: list[str]):
 
 
 def cmd_dashboard(args: list[str]):
-    """atlast dashboard [--port 3827] [--no-open] — launch local web dashboard"""
+    """atlast dashboard [--port 3827] [--no-open] [--host 0.0.0.0] — launch local web dashboard"""
     port = 3827
+    host = "127.0.0.1"
     open_browser = True
     i = 0
     while i < len(args):
         if args[i] == "--port" and i + 1 < len(args):
             port = int(args[i + 1])
+            i += 2
+        elif args[i] == "--host" and i + 1 < len(args):
+            host = args[i + 1]
             i += 2
         elif args[i] == "--no-open":
             open_browser = False
@@ -1725,7 +1729,7 @@ def cmd_dashboard(args: list[str]):
             i += 1
 
     from .dashboard_server import start_dashboard
-    start_dashboard(port=port, open_browser=open_browser)
+    start_dashboard(port=port, open_browser=open_browser, host=host)
 
 
 def main():
