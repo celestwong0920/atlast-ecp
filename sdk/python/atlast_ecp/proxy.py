@@ -300,8 +300,16 @@ def _extract_new_content(req_body: bytes, provider: str) -> dict:
 
 def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
                 agent: str, model: str, latency_ms: int,
-                tokens_in: Optional[int] = None, tokens_out: Optional[int] = None):
+                tokens_in: Optional[int] = None, tokens_out: Optional[int] = None,
+                http_status: int = 200):
     """Fire-and-forget ECP recording in background thread."""
+    # Classify infra errors (not the agent's fault)
+    INFRA_STATUSES = {429: "rate_limit", 500: "server_error", 502: "bad_gateway",
+                      503: "service_unavailable", 504: "gateway_timeout"}
+    is_infra = http_status in INFRA_STATUSES
+    error_type = INFRA_STATUSES.get(http_status)
+    is_client_error = 400 <= http_status < 500 and not is_infra
+
     def _do_record():
         try:
             import hashlib
@@ -316,6 +324,28 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
             resp_bytes = resp_content.encode("utf-8") if isinstance(resp_content, str) else resp_content
             full_response_hash = "sha256:" + hashlib.sha256(resp_bytes).hexdigest()
 
+            # Build flags
+            flags = []
+            if is_infra:
+                flags.append("infra_error")
+            if is_client_error:
+                flags.append("client_error")
+
+            vault_extra = {
+                "vault_version": 2,
+                "system_prompt": extracted["system_prompt"],
+                "full_request_hash": extracted["full_request_hash"],
+                "full_response_hash": full_response_hash,
+                "context_messages_count": extracted["context_messages_count"],
+                "session_id": extracted["session_id"],
+                "http_status": http_status,
+            }
+            if is_infra:
+                vault_extra["is_infra_error"] = True
+                vault_extra["error_type"] = error_type
+            if is_client_error:
+                vault_extra["is_client_error"] = True
+
             record_minimal_v2(
                 input_content=extracted["input"],
                 output_content=resp_content,
@@ -326,15 +356,8 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 session_id=extracted["session_id"],
-                # Vault v2 metadata
-                vault_extra={
-                    "vault_version": 2,
-                    "system_prompt": extracted["system_prompt"],
-                    "full_request_hash": extracted["full_request_hash"],
-                    "full_response_hash": full_response_hash,
-                    "context_messages_count": extracted["context_messages_count"],
-                    "session_id": extracted["session_id"],
-                },
+                flags=flags if flags else None,
+                vault_extra=vault_extra,
             )
         except Exception:
             pass  # Fail-Open
@@ -397,9 +420,14 @@ class ATLASTProxy:
                             request, resp, req_body, provider, model, t_start
                         )
         except Exception as e:
-            # Fail-Open: if proxy fails, return error but don't crash
+            # Fail-Open: record the proxy-level error, then return error
+            latency_ms = int((time.time() - t_start) * 1000)
+            error_msg = json.dumps({"error": f"ATLAST Proxy error: {str(e)}"})
+            _record_ecp(req_body, error_msg, request.path, provider,
+                         self.agent, model, latency_ms, http_status=502)
+            self.record_count += 1
             return web.Response(
-                text=json.dumps({"error": f"ATLAST Proxy error: {str(e)}"}),
+                text=error_msg,
                 status=502,
                 content_type="application/json",
             )
@@ -416,11 +444,12 @@ class ATLASTProxy:
             if k.lower() not in skip:
                 resp_headers[k] = v
 
-        # Record ECP
+        # Record ECP (including infra errors like 429/500/503)
         tokens_in, tokens_out = _extract_tokens_from_response(resp_body, provider)
         resp_text = resp_body.decode("utf-8", errors="replace")
         _record_ecp(req_body, resp_text, request.path, provider,
-                     self.agent, model, latency_ms, tokens_in, tokens_out)
+                     self.agent, model, latency_ms, tokens_in, tokens_out,
+                     http_status=resp.status)
         self.record_count += 1
 
         return web.Response(

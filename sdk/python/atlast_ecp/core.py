@@ -251,6 +251,7 @@ def record_minimal_v2(
     delegation_id: Optional[str] = None,
     delegation_depth: Optional[int] = None,
     vault_extra: Optional[dict] = None,
+    flags: Optional[list] = None,
 ) -> Optional[str]:
     """
     Minimal ECP recording with Vault v2 support (Proxy path).
@@ -276,7 +277,12 @@ def record_minimal_v2(
     """
     try:
         out_text = _extract_text(output_content)
-        flags = detect_flags(out_text, latency_ms=latency_ms)
+        auto_flags = detect_flags(out_text, latency_ms=latency_ms)
+        # Merge externally provided flags (e.g. infra_error from proxy)
+        if flags:
+            flags = list(set(auto_flags or []) | set(flags))
+        else:
+            flags = auto_flags
 
         meta: dict[str, Any] = {}
         if model:
