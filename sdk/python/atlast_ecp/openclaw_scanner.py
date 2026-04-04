@@ -200,6 +200,7 @@ def _set_agent_ecp_dir(agent_name: str):
     storage.ECP_DIR = Path(ecp_dir)
     storage.RECORDS_DIR = storage.ECP_DIR / "records"
     storage.LOCAL_DIR = storage.ECP_DIR / "local"
+    storage.VAULT_DIR = storage.ECP_DIR / "vault"
     storage.INDEX_FILE = storage.ECP_DIR / "index.json"
     storage.QUEUE_FILE = storage.ECP_DIR / "upload_queue.jsonl"
     storage.init_storage()
