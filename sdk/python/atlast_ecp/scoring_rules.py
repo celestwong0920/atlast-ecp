@@ -121,7 +121,6 @@ def classify_record(
         rules = get_rules()
 
     flag_set = set(flags) if flags else set()
-    input_lower = (input_text or "").lower()
     output_lower = (output_text or "").lower()
     output_stripped = (output_text or "").strip()
 

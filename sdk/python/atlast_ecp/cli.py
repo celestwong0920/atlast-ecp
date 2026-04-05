@@ -144,7 +144,7 @@ def cmd_verify(args: list[str]):
     else:
         # Check if we CAN sign now (even if this record wasn't signed at creation)
         try:
-            import nacl
+            import nacl  # noqa: F401
             print("  ℹ️  Signature: not signed at creation (records created after setup are signed)")
         except ImportError:
             print("  ℹ️  Signature: not signed (install pynacl for signed records)")
@@ -274,10 +274,14 @@ def cmd_stats(args: list[str]):
     total_excluded = hb + se + ie + ti
     if total_excluded > 0:
         parts = []
-        if hb: parts.append(f"{hb} heartbeat")
-        if se: parts.append(f"{se} system")
-        if ie: parts.append(f"{ie} infra")
-        if ti: parts.append(f"{ti} tool-chain")
+        if hb:
+            parts.append(f"{hb} heartbeat")
+        if se:
+            parts.append(f"{se} system")
+        if ie:
+            parts.append(f"{ie} infra")
+        if ti:
+            parts.append(f"{ti} tool-chain")
         print(f"  Interactions: {scores['interactions']}  (excluded: {', '.join(parts)})")
     else:
         print(f"  Interactions: {scores['interactions']}")
@@ -289,7 +293,6 @@ def cmd_stats(args: list[str]):
 
     reliability = scores["reliability"]
     hedge_r = scores["hedge_rate"]
-    error_r = scores["error_rate"]
     chain_i = signals["chain_integrity"]
 
     print(f"  Reliability     {_bar(1 - reliability)}  {int(reliability * 100)}%")
@@ -588,7 +591,8 @@ def cmd_init(args: list[str]):
             # Silently try to auto-upgrade to Ed25519
             try:
                 from nacl.signing import SigningKey
-                import stat, json
+                import stat
+                import json
                 sk = SigningKey.generate()
                 identity["pub_key"] = sk.verify_key.encode().hex()
                 identity["priv_key"] = sk.encode().hex()
@@ -653,7 +657,7 @@ def _auto_setup_proxy(identity: dict):
         # Try to detect from ~/.openclaw-* directories
         home = Path.home()
         candidates = sorted(home.glob(".openclaw-*"))
-        candidates = [d for d in candidates if d.is_dir() and not "backup" in d.name]
+        candidates = [d for d in candidates if d.is_dir() and "backup" not in d.name]
         if len(candidates) == 1:
             state_dir = str(candidates[0])
             profile = candidates[0].name.replace(".openclaw-", "")
@@ -726,7 +730,7 @@ run_proxy(port={proxy_port}, agent="{agent_name}")
         }
         with open(models_json, "w") as f:
             json.dump(models, f, indent=2)
-        print(f"  Routing: ✅ LLM calls → proxy → recorded")
+        print("  Routing: ✅ LLM calls → proxy → recorded")
     except Exception as e:
         print(f"  Routing: ⚠️  could not configure auto-routing: {e}")
         print(f"     Set ANTHROPIC_BASE_URL=http://127.0.0.1:{proxy_port}")
@@ -769,9 +773,9 @@ run_proxy(port={proxy_port}, agent="{agent_name}")
             # Load it (the current process already started proxy, this is for reboot persistence)
             subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist_path)],
                          capture_output=True, timeout=5)
-            print(f"  Persistence: ✅ auto-start on reboot")
+            print("  Persistence: ✅ auto-start on reboot")
         except Exception:
-            print(f"  Persistence: ⚠️  proxy running but won't auto-start on reboot")
+            print("  Persistence: ⚠️  proxy running but won't auto-start on reboot")
 
 
 def _ask_backup_location():
@@ -1675,7 +1679,6 @@ def cmd_demo(args: list[str]):
 def cmd_doctor(args: list[str]):
     """atlast doctor — diagnose environment and auto-fix common issues"""
     import shutil
-    from pathlib import Path
 
     print("\n🩺 ATLAST Doctor — checking your environment...\n")
     issues = []
@@ -1705,7 +1708,7 @@ def cmd_doctor(args: list[str]):
     if ECP_DIR.exists():
         print(f"  ✅ Storage: {ECP_DIR}")
     else:
-        print(f"  ⚠️  Storage not initialized — fixing...")
+        print("  ⚠️  Storage not initialized — fixing...")
         try:
             from .storage import init_storage
             init_storage()
@@ -1739,7 +1742,7 @@ def cmd_doctor(args: list[str]):
                         id_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
                     except OSError:
                         pass
-                    print(f"  ✅ Auto-upgraded to Ed25519!")
+                    print("  ✅ Auto-upgraded to Ed25519!")
                     fixed.append("Upgraded identity to Ed25519")
                 except ImportError:
                     pass  # PyNaCl not available, fallback is fine
@@ -1782,10 +1785,10 @@ def cmd_doctor(args: list[str]):
         server_url = get_api_url()
         import urllib.request
         req = urllib.request.Request(f"{server_url}/health", method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5):
             print(f"  ✅ Server: {server_url} (online)")
     except Exception:
-        print(f"  ⚠️  Server: offline (not critical — records are saved locally)")
+        print("  ⚠️  Server: offline (not critical — records are saved locally)")
 
     # 7. Records count
     records_dir = ECP_DIR / "records"

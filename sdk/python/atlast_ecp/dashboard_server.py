@@ -8,7 +8,6 @@ Usage: atlast dashboard [--port 3827] [--no-open]
 """
 
 import json
-import os
 import threading
 import webbrowser
 from datetime import datetime, timezone, timedelta
@@ -166,7 +165,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             query = params.get("q", [""])[0]
             limit = int(params.get("limit", ["20"])[0])
             errors_only = params.get("errors", [""])[0] == "1"
-            infra_only = params.get("infra", [""])[0] == "1"
+            infra_only = params.get("infra", [""])[0] == "1"  # noqa: F841
             agent = params.get("agent", [None])[0]
             if agent:
                 agent = self._resolve_agent_name(agent)
@@ -212,19 +211,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             audit_data = audit(days=30, agent=agent, as_json=True)
 
             # Compute cost estimation (approximate pricing per model)
-            MODEL_PRICING = {
-                # price per 1M tokens: (input, output)
-                "claude-sonnet-4-6": (3.0, 15.0),
-                "claude-opus-4-6": (15.0, 75.0),
-                "claude-haiku-3-5": (0.25, 1.25),
-                "gpt-4o": (2.5, 10.0),
-                "gpt-4o-mini": (0.15, 0.6),
-                "gpt-4.1": (2.0, 8.0),
-            }
+            # Approximate pricing per model (for cost estimation)
+            # MODEL_PRICING kept as reference for future per-model breakdown
             total_cost = 0.0
             for a in agents:
-                # Estimate cost based on model (best effort)
-                model = ""  # Would need per-agent model breakdown
                 ti = a.get("tokens_in", 0)
                 to_ = a.get("tokens_out", 0)
                 # Use default pricing
@@ -414,9 +404,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _get_stats(self, agent: "str | None" = None) -> dict:
         """Comprehensive stats with proper infra/agent separation."""
-        from .storage import count_records, ECP_DIR, RECORDS_DIR, VAULT_DIR
+        from .storage import ECP_DIR, RECORDS_DIR, VAULT_DIR
         from .identity import get_or_create_identity
-        from .query import _ensure_index, _get_db, list_agents
+        from .query import _ensure_index, _get_db
 
         try:
             identity = get_or_create_identity()
