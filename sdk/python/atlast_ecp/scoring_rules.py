@@ -121,7 +121,36 @@ def classify_record(
         rules = get_rules()
 
     flag_set = set(flags) if flags else set()
+    input_lower = (input_text or "").lower()
     output_lower = (output_text or "").lower()
+    output_stripped = (output_text or "").strip()
+
+    # ── Retroactive detection for pre-v0.17 records (no factual flags) ──
+    # Detect heartbeat from content even if flag is missing
+    if "heartbeat" not in flag_set and "HEARTBEAT" in (input_text or "") and len(output_stripped) < 100:
+        flag_set.add("heartbeat")
+
+    # Detect provider_error from content
+    if "provider_error" not in flag_set:
+        provider_error_patterns = [
+            "extra usage", "billing", "quota", "third-party apps",
+            "invalid_request_error", "insufficient_quota",
+        ]
+        # Check if output looks like a provider error JSON
+        if output_lower.startswith('{"type":"error"') or output_lower.startswith('{"error"'):
+            flag_set.add("provider_error")
+        elif any(p in output_lower for p in provider_error_patterns):
+            flag_set.add("provider_error")
+
+    # Detect empty_output
+    if "empty_output" not in flag_set and not output_stripped:
+        flag_set.add("empty_output")
+
+    # Detect has_tool_calls from incomplete flag + empty output (legacy heuristic)
+    # In v0.16, tool_call responses were marked "incomplete" because output was empty
+    if "incomplete" in flag_set and not output_stripped:
+        flag_set.add("has_tool_calls")
+        flag_set.add("empty_output")
 
     for rule in rules.get("classification", []):
         if rule.get("conditions", {}).get("default"):
