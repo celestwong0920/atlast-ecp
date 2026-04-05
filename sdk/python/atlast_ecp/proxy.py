@@ -426,10 +426,10 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
             resp_bytes = resp_content.encode("utf-8") if isinstance(resp_content, str) else resp_content
             full_response_hash = "sha256:" + hashlib.sha256(resp_bytes).hexdigest()
 
-            # Detect heartbeat: input contains HEARTBEAT and output is short
+            # Detect heartbeat: input contains HEARTBEAT (system-injected prompt)
             is_heartbeat = False
             input_text = extracted.get("input", "") or ""
-            if "HEARTBEAT" in input_text and len(resp_content.strip()) < 100:
+            if "HEARTBEAT" in input_text:
                 is_heartbeat = True
 
             # Detect provider error from response body (billing, quota, auth)
