@@ -394,6 +394,53 @@ def _extract_new_content(req_body: bytes, provider: str) -> dict:
     return result
 
 
+# ─── Heartbeat State ──────────────────────────────────────────────────────────
+
+def _update_heartbeat_state(success: bool = True, latency_ms: int = 0):
+    """Update heartbeat.json instead of writing a full ECP record.
+
+    Heartbeats are uptime evidence, not behavior evidence.
+    One summary per day is enough — no need for 48 individual records.
+    """
+    import os
+    from datetime import datetime, timezone
+
+    ecp_dir = Path(os.environ.get("ATLAST_ECP_DIR", os.environ.get("ECP_DIR", os.path.expanduser("~/.ecp"))))
+    hb_path = ecp_dir / "heartbeat.json"
+
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+
+    # Load existing state
+    state = {}
+    if hb_path.exists():
+        try:
+            state = json.loads(hb_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            state = {}
+
+    # Reset counters if new day
+    if state.get("date") != today:
+        state = {
+            "date": today,
+            "total": 0,
+            "success": 0,
+            "failed": 0,
+            "first_seen": now.isoformat(),
+            "last_seen": now.isoformat(),
+        }
+
+    state["total"] = state.get("total", 0) + 1
+    if success:
+        state["success"] = state.get("success", 0) + 1
+    else:
+        state["failed"] = state.get("failed", 0) + 1
+    state["last_seen"] = now.isoformat()
+    state["status"] = "online"
+
+    hb_path.write_text(json.dumps(state, indent=2))
+
+
 # ─── ECP Recording ────────────────────────────────────────────────────────────
 
 def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
@@ -432,6 +479,17 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
             if "HEARTBEAT" in input_text:
                 is_heartbeat = True
 
+            # Heartbeat → update heartbeat.json, skip record creation
+            if is_heartbeat:
+                try:
+                    _update_heartbeat_state(
+                        success=not is_provider_error and not is_client_error and not is_infra,
+                        latency_ms=latency_ms,
+                    )
+                except Exception:
+                    pass  # Fail-Open
+                return  # Skip record_minimal_v2
+
             # Detect provider error from response body (billing, quota, auth)
             detected_provider_error = is_provider_error
             if not detected_provider_error and http_status < 500:
@@ -468,8 +526,6 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
                 flags.append("empty_output")
             if not input_text.strip() or extracted.get("is_tool_continuation"):
                 flags.append("empty_input")
-            if is_heartbeat:
-                flags.append("heartbeat")
             if detected_provider_error:
                 flags.append("provider_error")
 
@@ -501,8 +557,6 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
                 vault_extra["error_type"] = error_type
             if is_client_error:
                 vault_extra["is_client_error"] = True
-            if is_heartbeat:
-                vault_extra["is_heartbeat"] = True
             if detected_provider_error:
                 vault_extra["is_provider_error"] = True
 
