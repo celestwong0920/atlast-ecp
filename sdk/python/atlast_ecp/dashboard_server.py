@@ -551,6 +551,38 @@ def _get_enhancement_script() -> str:
 body { padding-top: 44px !important; }
 body.guide-dismissed { padding-top: 0 !important; }
 
+/* Trust Score Panel */
+#atlast-trust-score {
+  margin: 16px 20px; padding: 20px 24px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  border: 1px solid #334155; border-radius: 12px;
+  font-family: system-ui, -apple-system, sans-serif; color: #e2e8f0;
+}
+.ts-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.ts-icon { font-size: 24px; }
+.ts-title { font-size: 18px; font-weight: 700; color: #f8fafc; }
+.ts-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px; margin-bottom: 14px;
+}
+.ts-card {
+  background: rgba(255,255,255,0.05); border-radius: 8px; padding: 12px;
+  text-align: center; border: 1px solid rgba(255,255,255,0.08);
+}
+.ts-value { font-size: 24px; font-weight: 700; color: #93c5fd; }
+.ts-value.ts-green { color: #4ade80; }
+.ts-label { font-size: 11px; color: #94a3b8; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.ts-breakdown { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ts-tag {
+  padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 500;
+  background: rgba(99,102,241,0.2); color: #a5b4fc;
+}
+.ts-tag-heartbeat { background: rgba(234,179,8,0.2); color: #fde047; }
+.ts-tag-tool_intermediate { background: rgba(168,85,247,0.2); color: #c4b5fd; }
+.ts-tag-interaction { background: rgba(34,197,94,0.2); color: #86efac; }
+.ts-excluded { font-size: 12px; color: #64748b; }
+.ts-exc { margin-right: 4px; }
+
 /* Vault overlay */
 #atlast-vault-overlay {
   display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -810,6 +842,73 @@ body.guide-dismissed { padding-top: 0 !important; }
 
   // Also make window.openVault available for manual use
   window.atlastOpenVault = openVault;
+
+  // ── Trust Score Panel ──
+  async function loadTrustScore() {
+    try {
+      const res = await fetch('/api/scores');
+      const data = await res.json();
+      if (data.error) return;
+
+      const panel = document.createElement('div');
+      panel.id = 'atlast-trust-score';
+      panel.innerHTML = `
+        <div class="ts-header">
+          <span class="ts-icon">🛡️</span>
+          <span class="ts-title">Trust Score</span>
+        </div>
+        <div class="ts-grid">
+          <div class="ts-card">
+            <div class="ts-value ts-green">${(data.reliability * 100).toFixed(0)}%</div>
+            <div class="ts-label">Reliability</div>
+          </div>
+          <div class="ts-card">
+            <div class="ts-value">${data.interactions}</div>
+            <div class="ts-label">Interactions</div>
+          </div>
+          <div class="ts-card">
+            <div class="ts-value">${(data.error_rate * 100).toFixed(1)}%</div>
+            <div class="ts-label">Error Rate</div>
+          </div>
+          <div class="ts-card">
+            <div class="ts-value">${(data.avg_latency_ms / 1000).toFixed(1)}s</div>
+            <div class="ts-label">Avg Latency</div>
+          </div>
+          <div class="ts-card">
+            <div class="ts-value">${(data.hedge_rate * 100).toFixed(1)}%</div>
+            <div class="ts-label">Hedge Rate</div>
+          </div>
+          <div class="ts-card">
+            <div class="ts-value">${data.total_records}</div>
+            <div class="ts-label">Total Records</div>
+          </div>
+        </div>
+        <div class="ts-breakdown">
+          ${Object.entries(data.classification_breakdown || {}).map(([k,v]) =>
+            `<span class="ts-tag ts-tag-${k}">${k}: ${v}</span>`
+          ).join('')}
+        </div>
+        <div class="ts-excluded">
+          ${Object.entries(data.excluded || {}).map(([k,v]) =>
+            `<span class="ts-exc">⊘ ${v} ${k}</span>`
+          ).join(' · ')}
+        </div>
+      `;
+
+      // Insert at top of main content
+      const mainEl = document.querySelector('main') || document.querySelector('[class*="container"]') || document.body.firstElementChild;
+      if (mainEl && mainEl.parentNode) {
+        mainEl.parentNode.insertBefore(panel, mainEl);
+      } else {
+        document.body.prepend(panel);
+      }
+    } catch(e) {
+      console.warn('[ATLAST] Trust Score load failed:', e);
+    }
+  }
+
+  // Load after page settles
+  setTimeout(loadTrustScore, 1500);
 
   console.log("[ATLAST] Dashboard enhancements loaded. Click any record to view vault content.");
 })();
