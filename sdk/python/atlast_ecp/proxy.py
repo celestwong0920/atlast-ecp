@@ -279,6 +279,127 @@ _SESSION_CACHE_MAX = 1000
 _session_system_prompts: dict[str, str] = {}  # session_id → last system_prompt_hash
 _session_lock = threading.Lock()
 
+# ─── Conversation Buffer ─────────────────────────────────────────────────────
+# Aggregates multiple API calls (user→tool_call→tool_result→...→final) into
+# one complete ECP record. Key = session_id.
+
+_conversation_buffers: dict[str, dict] = {}  # session_id → buffer
+_conv_lock = threading.Lock()
+_CONV_TIMEOUT_S = 300  # Flush orphaned buffers after 5 minutes
+
+
+def _flush_conversation(session_id: str):
+    """Flush a conversation buffer into a single aggregated ECP record."""
+    with _conv_lock:
+        buf = _conversation_buffers.pop(session_id, None)
+    if not buf or not buf.get("steps"):
+        return
+
+    steps = buf["steps"]
+    first = steps[0]
+    last = steps[-1]
+
+    # Aggregate: user input from first step, final output from last
+    user_input = first.get("input", "")
+    final_output = last.get("output", "")
+
+    # Collect all tool calls across all steps
+    all_tool_calls = []
+    for s in steps:
+        if s.get("tool_calls"):
+            all_tool_calls.extend(s["tool_calls"])
+
+    # Build detailed steps log for vault
+    steps_detail = []
+    for i, s in enumerate(steps):
+        step_info = {
+            "step": i + 1,
+            "latency_ms": s.get("latency_ms", 0),
+            "has_tool_calls": bool(s.get("tool_calls")),
+        }
+        if s.get("tool_calls"):
+            step_info["tool_calls"] = [
+                {"name": tc.get("name", ""), "input": tc.get("input", {})}
+                for tc in s["tool_calls"]
+            ]
+        if s.get("output") and not s["output"].startswith('{"tool_calls"'):
+            step_info["output_preview"] = s["output"][:200]
+        steps_detail.append(step_info)
+
+    # Total latency and tokens
+    total_latency = sum(s.get("latency_ms", 0) for s in steps)
+    total_tokens_in = sum(s.get("tokens_in", 0) or 0 for s in steps)
+    total_tokens_out = sum(s.get("tokens_out", 0) or 0 for s in steps)
+
+    # Build flags for the aggregated record (no tool_continuation/empty flags)
+    agg_flags = []
+    if any(s.get("is_streaming") for s in steps):
+        agg_flags.append("streaming")
+    if all_tool_calls:
+        agg_flags.append("has_tool_calls")
+    if any(s.get("is_infra") for s in steps):
+        agg_flags.append("infra_error")
+    if any(s.get("is_provider_error") for s in steps):
+        agg_flags.append("provider_error")
+    # Detect behavioral flags from final output
+    from .signals import detect_flags
+    behavioral = detect_flags(
+        final_output,
+        latency_ms=total_latency,
+    )
+    for f in behavioral:
+        if f not in agg_flags:
+            agg_flags.append(f)
+
+    # Build vault output with full conversation detail
+    vault_output = final_output
+    if all_tool_calls:
+        vault_output = json.dumps({
+            "final_response": final_output,
+            "tool_calls_used": [{"name": tc.get("name", ""), "input": tc.get("input", {})} for tc in all_tool_calls],
+            "steps": len(steps),
+        }, ensure_ascii=False)
+
+    vault_extra = {
+        "vault_version": 2,
+        "system_prompt": first.get("system_prompt"),
+        "full_request_hash": first.get("full_request_hash"),
+        "session_id": session_id,
+        "conversation_steps": steps_detail,
+        "total_api_calls": len(steps),
+        "tool_calls_count": len(all_tool_calls),
+    }
+
+    try:
+        from .core import record_minimal_v2
+        record_minimal_v2(
+            input_content=user_input,
+            output_content=vault_output,
+            agent=buf.get("agent", "proxy"),
+            action="llm_call",
+            model=first.get("model") or last.get("model"),
+            latency_ms=total_latency,
+            tokens_in=total_tokens_in,
+            tokens_out=total_tokens_out,
+            session_id=session_id,
+            flags=list(set(agg_flags)) if agg_flags else None,
+            vault_extra=vault_extra,
+        )
+    except Exception:
+        pass  # Fail-Open
+
+
+def _cleanup_stale_buffers():
+    """Flush conversation buffers older than timeout."""
+    now = time.time()
+    stale = []
+    with _conv_lock:
+        for sid, buf in _conversation_buffers.items():
+            if now - buf.get("last_update", 0) > _CONV_TIMEOUT_S:
+                stale.append(sid)
+    for sid in stale:
+        _flush_conversation(sid)
+
 
 def _extract_new_content(req_body: bytes, provider: str) -> dict:
     """
@@ -462,7 +583,6 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
     def _do_record():
         try:
             import hashlib
-            from .core import record_minimal_v2
 
             meta_model = model if model != "unknown" else None
 
@@ -488,7 +608,7 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
                     )
                 except Exception:
                     pass  # Fail-Open
-                return  # Skip record_minimal_v2
+                return  # Skip recording
 
             # Detect provider error from response body (billing, quota, auth)
             detected_provider_error = is_provider_error
@@ -500,79 +620,117 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
                 except (json.JSONDecodeError, ValueError):
                     pass
 
-            # Has tool calls?
+            # Has tool calls? = conversation is NOT done yet
             has_tool_calls = bool(tool_calls) or stop_reason in ("tool_use", "tool_calls")
 
-            # Build flags — legacy + factual
-            flags = []
-            # Legacy flags (backward compat)
-            if is_infra:
-                flags.append("infra_error")
-            if is_client_error:
-                flags.append("client_error")
+            session_id = extracted.get("session_id") or "unknown"
+            is_continuation = extracted.get("is_tool_continuation", False)
 
-            # Factual flags (v0.17+)
-            if http_status and 400 <= http_status < 500:
-                flags.append("http_4xx")
-            if http_status and 500 <= http_status < 600:
-                flags.append("http_5xx")
-            if is_streaming:
-                flags.append("streaming")
-            if has_tool_calls:
-                flags.append("has_tool_calls")
-            if extracted.get("is_tool_continuation"):
-                flags.append("tool_continuation")
-            if not resp_content.strip():
-                flags.append("empty_output")
-            if not input_text.strip() or extracted.get("is_tool_continuation"):
-                flags.append("empty_input")
-            if detected_provider_error:
-                flags.append("provider_error")
+            # Build step data for this API call
+            step_data = {
+                "input": extracted["input"],
+                "output": resp_content,
+                "model": meta_model,
+                "latency_ms": latency_ms,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "tool_calls": tool_calls,
+                "is_streaming": is_streaming,
+                "is_infra": is_infra,
+                "is_provider_error": detected_provider_error,
+                "system_prompt": extracted.get("system_prompt"),
+                "full_request_hash": extracted.get("full_request_hash"),
+                "stop_reason": stop_reason,
+                "http_status": http_status,
+            }
 
-            # Build vault output: include tool_calls if present
-            vault_output = resp_content
-            if has_tool_calls and tool_calls and not resp_content.strip():
-                # For tool_call-only responses, store tool info so vault isn't empty
-                vault_output = json.dumps(
-                    {"tool_calls": [{"name": tc.get("name", ""), "input": tc.get("input", {})} for tc in tool_calls]},
-                    ensure_ascii=False,
+            # ── Conversation aggregation ──
+            # If this is a tool_continuation → add to existing buffer
+            # If this returns tool_use → buffer it, don't write yet
+            # If this is a final response (no tool_use) → flush buffer as one record
+
+            if is_continuation:
+                # This is a tool_result follow-up → add to buffer
+                with _conv_lock:
+                    if session_id not in _conversation_buffers:
+                        # Orphaned continuation (no buffer) → create one
+                        _conversation_buffers[session_id] = {
+                            "agent": agent,
+                            "steps": [],
+                            "last_update": time.time(),
+                        }
+                    _conversation_buffers[session_id]["steps"].append(step_data)
+                    _conversation_buffers[session_id]["last_update"] = time.time()
+
+                if not has_tool_calls:
+                    # Final response — flush the whole conversation as one record
+                    _flush_conversation(session_id)
+                # else: still more tool calls coming, keep buffering
+
+            elif has_tool_calls:
+                # New user message but agent returned tool_use → start buffer
+                # Flush any stale buffer for this session first
+                _flush_conversation(session_id)
+                with _conv_lock:
+                    _conversation_buffers[session_id] = {
+                        "agent": agent,
+                        "steps": [step_data],
+                        "last_update": time.time(),
+                    }
+                # Don't write record yet — wait for final response
+
+            else:
+                # Simple single-turn conversation (no tool calls)
+                # Write immediately as one record
+                _flush_conversation(session_id)  # flush any stale buffer
+
+                agg_flags = []
+                if is_streaming:
+                    agg_flags.append("streaming")
+                if is_infra:
+                    agg_flags.append("infra_error")
+                if is_client_error:
+                    agg_flags.append("client_error")
+                if detected_provider_error:
+                    agg_flags.append("provider_error")
+
+                from .signals import detect_flags
+                behavioral = detect_flags(
+                    resp_content,
+                    latency_ms=latency_ms,
+                )
+                for f in behavioral:
+                    if f not in agg_flags:
+                        agg_flags.append(f)
+
+                vault_extra = {
+                    "vault_version": 2,
+                    "system_prompt": extracted["system_prompt"],
+                    "full_request_hash": extracted["full_request_hash"],
+                    "full_response_hash": full_response_hash,
+                    "session_id": session_id,
+                    "http_status": http_status,
+                    "stop_reason": stop_reason,
+                }
+
+                from .core import record_minimal_v2
+                record_minimal_v2(
+                    input_content=extracted["input"],
+                    output_content=resp_content,
+                    agent=agent,
+                    action=_detect_action(path),
+                    model=meta_model,
+                    latency_ms=latency_ms,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    session_id=session_id,
+                    flags=list(set(agg_flags)) if agg_flags else None,
+                    vault_extra=vault_extra,
                 )
 
-            vault_extra = {
-                "vault_version": 2,
-                "system_prompt": extracted["system_prompt"],
-                "full_request_hash": extracted["full_request_hash"],
-                "full_response_hash": full_response_hash,
-                "context_messages_count": extracted["context_messages_count"],
-                "session_id": extracted["session_id"],
-                "http_status": http_status,
-                "stop_reason": stop_reason,
-            }
-            if tool_calls:
-                vault_extra["tool_calls"] = [
-                    {"name": tc.get("name", ""), "input": tc.get("input", {})} for tc in tool_calls
-                ]
-            if is_infra:
-                vault_extra["is_infra_error"] = True
-                vault_extra["error_type"] = error_type
-            if is_client_error:
-                vault_extra["is_client_error"] = True
-            if detected_provider_error:
-                vault_extra["is_provider_error"] = True
+            # Periodic cleanup of stale buffers
+            _cleanup_stale_buffers()
 
-            record_minimal_v2(
-                input_content=extracted["input"],
-                output_content=vault_output,
-                agent=agent,
-                action=_detect_action(path),
-                model=meta_model,
-                latency_ms=latency_ms,
-                tokens_in=tokens_in,
-                tokens_out=tokens_out,
-                session_id=extracted["session_id"],
-                flags=list(set(flags)) if flags else None,
-                vault_extra=vault_extra,
-            )
         except Exception:
             pass  # Fail-Open
 
