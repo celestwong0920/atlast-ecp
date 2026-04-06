@@ -244,6 +244,11 @@ def _cmd_verify_a2a(args: list[str]):
 
 def cmd_stats(args: list[str]):
     """atlast stats"""
+    try:
+        from .flush import flush_stale_buffers
+        flush_stale_buffers()
+    except Exception:
+        pass
     from .config import get_api_url
     from .storage import load_records, count_records
     from .signals import compute_trust_signals
@@ -1262,6 +1267,11 @@ def cmd_record(args: list[str]):
 
 def cmd_log(args: list[str]):
     """atlast log [--limit N] [--date YYYY-MM-DD] — view ECP records (alias: view)"""
+    try:
+        from .flush import flush_stale_buffers
+        flush_stale_buffers()
+    except Exception:
+        pass
     cmd_view(args)
 
 
@@ -1803,6 +1813,11 @@ def cmd_demo(args: list[str]):
 def cmd_doctor(args: list[str]):
     """atlast doctor — diagnose environment and auto-fix common issues"""
     import shutil
+    try:
+        from .flush import flush_stale_buffers
+        flush_stale_buffers()
+    except Exception:
+        pass
 
     print("\n🩺 ATLAST Doctor — checking your environment...\n")
     issues = []

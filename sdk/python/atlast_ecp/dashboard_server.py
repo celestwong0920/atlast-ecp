@@ -74,6 +74,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_api(self, path: str, params: dict):
         try:
+            # Auto-flush stale Claude Code buffers before serving data
+            try:
+                from .flush import flush_stale_buffers
+                flush_stale_buffers()
+            except Exception:
+                pass  # Fail-Open
             result = self._dispatch_api(path, params)
             self._json_response(200, result)
         except Exception as e:
