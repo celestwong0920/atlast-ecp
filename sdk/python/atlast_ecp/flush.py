@@ -71,22 +71,44 @@ def flush_stale_buffers(timeout_s: int = FLUSH_TIMEOUT_S) -> int:
                             if tl.strip():
                                 try: entries.append(json.loads(tl))
                                 except: pass
-                        # Last real user message (text, not tool_result)
-                        for e in reversed(entries):
+
+                        # Collect real user messages (text, not tool_results)
+                        user_msgs = []
+                        for i, e in enumerate(entries):
                             if e.get("type") == "user":
                                 c = e.get("message", {}).get("content", "")
-                                if isinstance(c, str) and len(c) > 0:
-                                    user_input = c[:1000]
-                                    break
-                        # Last assistant text response
-                        for e in reversed(entries):
+                                if isinstance(c, str) and len(c.strip()) > 0:
+                                    user_msgs.append({"idx": i, "text": c})
+
+                        # Collect assistant text responses
+                        asst_msgs = []
+                        for i, e in enumerate(entries):
                             if e.get("type") == "assistant":
                                 content = e.get("message", {}).get("content", [])
                                 if isinstance(content, list):
                                     texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
                                     if texts:
-                                        agent_response = "\n".join(texts)[:3000]
-                                        break
+                                        asst_msgs.append({"idx": i, "text": "\n".join(texts)})
+
+                        # Match by block: find last user message block that has tool_results
+                        if user_msgs:
+                            for mi in range(len(user_msgs) - 1, -1, -1):
+                                um = user_msgs[mi]
+                                next_idx = user_msgs[mi + 1]["idx"] if mi + 1 < len(user_msgs) else len(entries)
+                                # Check if this block has tool_results
+                                has_tools = any(
+                                    e.get("type") == "user" and isinstance(e.get("message", {}).get("content"), list)
+                                    and any(isinstance(c, dict) and c.get("type") == "tool_result" for c in e["message"]["content"])
+                                    for e in entries[um["idx"]:next_idx]
+                                )
+                                if has_tools:
+                                    user_input = um["text"][:1000]
+                                    # Find last assistant response in this block
+                                    for ar in reversed(asst_msgs):
+                                        if um["idx"] < ar["idx"] < next_idx:
+                                            agent_response = ar["text"][:3000]
+                                            break
+                                    break
                 except Exception:
                     pass
 
