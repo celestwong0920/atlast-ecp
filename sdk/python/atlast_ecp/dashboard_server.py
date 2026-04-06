@@ -143,11 +143,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 vault_data = json.loads(vault_file.read_text())
             except Exception as exc:
                 return {"error": f"Failed to read vault: {exc}"}
-            # Truncate very long content for display
+            # Truncate very long content for display — but preserve JSON structure
             for key in ("input", "output"):
                 val = vault_data.get(key, "")
-                if isinstance(val, str) and len(val) > 10000:
-                    vault_data[key] = val[:10000] + f"\n\n... (truncated, full content: {len(val)} chars)"
+                if isinstance(val, str) and len(val) > 50000:
+                    # Only truncate extremely large content; preserve JSON-parseable data
+                    vault_data[key] = val[:50000] + f"\n\n... (truncated, full content: {len(val)} chars)"
             vault_data["_vault_path"] = str(vault_file)
             vault_data["_ecp_dir"] = str(ECP_DIR)
             return vault_data
