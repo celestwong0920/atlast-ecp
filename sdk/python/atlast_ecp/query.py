@@ -120,10 +120,12 @@ def rebuild_index(verbose: bool = False) -> int:
             if not record_id:
                 continue
 
+            # Support both "step" (SDK path) and "meta" (proxy path) field locations
             step = r.get("step", {})
+            meta = r.get("meta", {})
             chain = r.get("chain", {})
-            flags = step.get("flags", [])
-            confidence = step.get("confidence")
+            flags = step.get("flags") or meta.get("flags", [])
+            confidence = step.get("confidence") or meta.get("confidence")
             if isinstance(confidence, dict):
                 confidence = confidence.get("score")
 
@@ -173,14 +175,14 @@ def rebuild_index(verbose: bool = False) -> int:
                     r.get("agent", ""),
                     ts,
                     date_str,
-                    step.get("type", ""),
-                    step.get("action", ""),
-                    step.get("model", ""),
-                    step.get("latency_ms", 0),
+                    step.get("type") or meta.get("type") or r.get("action", ""),
+                    step.get("action") or meta.get("action") or r.get("action", ""),
+                    step.get("model") or meta.get("model", ""),
+                    step.get("latency_ms") or meta.get("latency_ms", 0) or 0,
                     confidence,
-                    step.get("session_id") or r.get("session_id", ""),
-                    step.get("delegation_id") or r.get("delegation_id", ""),
-                    step.get("delegation_depth") or r.get("delegation_depth"),
+                    step.get("session_id") or meta.get("session_id") or r.get("session_id", ""),
+                    step.get("delegation_id") or meta.get("delegation_id") or r.get("delegation_id", ""),
+                    step.get("delegation_depth") or meta.get("delegation_depth") or r.get("delegation_depth"),
                     chain.get("prev", ""),
                     chain.get("hash", ""),
                     json.dumps(flags) if flags else "[]",
@@ -189,8 +191,8 @@ def rebuild_index(verbose: bool = False) -> int:
                     has_error,
                     is_infra,
                     error_type,
-                    step.get("tokens_in", 0) or 0,
-                    step.get("tokens_out", 0) or 0,
+                    step.get("tokens_in") or meta.get("tokens_in", 0) or 0,
+                    step.get("tokens_out") or meta.get("tokens_out", 0) or 0,
                     now_ms,
                 ))
                 count += 1

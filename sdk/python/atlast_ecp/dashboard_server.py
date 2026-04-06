@@ -61,16 +61,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             data = self._inject_enhancements(data)
         self.send_response(200)
         self.send_header("Content-Type", f"{content_type}; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         self.end_headers()
         self.wfile.write(data)
 
     def _inject_enhancements(self, html_bytes: bytes) -> bytes:
-        """Inject vault viewer, guidance banner, and UX enhancements."""
-        enhancement_script = _get_enhancement_script()
-        html = html_bytes.decode("utf-8")
-        html = html.replace("</body>", f"{enhancement_script}\n</body>")
-        return html.encode("utf-8")
+        """No-op: new React dashboard has all UX features built-in.
+        Legacy enhancement injection disabled to avoid CSS/JS conflicts."""
+        return html_bytes
 
     def _handle_api(self, path: str, params: dict):
         try:
