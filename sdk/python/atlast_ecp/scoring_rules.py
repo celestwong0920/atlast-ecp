@@ -345,70 +345,92 @@ def calculate_scores(
 
 def compute_trust_score_1000(classified_records: list[dict], chain_integrity: float = 1.0) -> dict:
     """
-    Compute ATLAST Trust Score (0-1000) per whitepaper §7.2.
+    Compute ATLAST Trust Score (0-1000).
+
+    Fair scoring principle: ONLY score what the agent can control.
+    Infra errors, API latency, provider billing — NOT the agent's fault.
 
     Four signal layers:
-      Layer 1: Behavioral Reliability (40%) — error, retry, completion, latency consistency
-      Layer 2: Consistency (25%)            — output stability, drift (placeholder)
-      Layer 3: Transparency (20%)           — chain integrity, recording coverage
-      Layer 4: External Validation (15%)    — owner feedback (placeholder)
+      Layer 1: Task Completion (50%)       — did the agent complete the task?
+      Layer 2: Response Quality (25%)      — quality and consistency of responses
+      Layer 3: Evidence Integrity (15%)    — chain integrity, recording coverage
+      Layer 4: Track Record (10%)          — history depth and stability
+
+    What does NOT affect score:
+      - high_latency: API/model speed is not the agent's fault
+      - hedge_rate: cautious language ("I think", "maybe") is responsible behavior
+      - infra_error: provider outages are not the agent's fault
+      - system_error: billing/quota issues are the user's fault
 
     Returns:
         {
             "trust_score": int (0-1000),
-            "layers": {
-                "behavioral_reliability": {"score": float, "weight": 0.40, "weighted": float},
-                "consistency":            {"score": float, "weight": 0.25, "weighted": float},
-                "transparency":           {"score": float, "weight": 0.20, "weighted": float},
-                "external_validation":    {"score": float, "weight": 0.15, "weighted": float},
-            },
-            "raw_scores": {...}  # underlying calculate_scores output
+            "layers": { ... },
+            "raw_scores": { ... }
         }
     """
     raw = calculate_scores(classified_records)
     interactions = raw["interactions"]
 
-    # ── Layer 1: Behavioral Reliability (40%) ──
-    # Reliability (no errors) = 60% of layer, latency consistency = 40% of layer
-    reliability = raw.get("reliability", 1.0)
-    high_latency_rate = raw.get("high_latency_rate", 0.0)
-    latency_score = max(0, 1.0 - high_latency_rate)  # lower high_latency = better
-    layer1 = reliability * 0.6 + latency_score * 0.4
+    # ── Layer 1: Task Completion (50%) ──
+    # Only count AGENT errors (not infra, not provider, not user)
+    # Completion = agent gave a response without crashing
+    reliability = raw.get("reliability", 1.0)  # already excludes infra errors
+    error_rate = raw.get("error_rate", 0.0)    # only agent errors
 
-    # ── Layer 2: Consistency (25%) ──
-    # Placeholder: based on incomplete_rate and hedge_rate for now
-    # Full implementation needs cross-temporal hash comparison
+    # Completion score: 100% if no agent errors, scales down with errors
+    layer1 = reliability
+
+    # ── Layer 2: Response Quality (25%) ──
+    # incomplete_rate: only counts records where agent explicitly gave up
+    # (NOT "I cannot access" which is a tool limitation, only true failures)
     incomplete_rate = raw.get("incomplete_rate", 0.0)
-    hedge_rate = raw.get("hedge_rate", 0.0)
-    layer2 = max(0, 1.0 - incomplete_rate - hedge_rate)
 
-    # ── Layer 3: Transparency (20%) ──
-    # Chain integrity + recording coverage
+    # Quality = 1.0 minus genuine incomplete responses
+    # hedge_rate is NOT penalized — cautious language is responsible behavior
+    layer2 = max(0, 1.0 - incomplete_rate)
+
+    # ── Layer 3: Evidence Integrity (15%) ──
+    # Chain integrity: are all records properly linked?
+    # This measures the PROTOCOL's integrity, not the agent
+    # Use the chain_integrity passed in (from signals or dashboard)
     layer3 = chain_integrity
 
-    # ── Layer 4: External Validation (15%) ──
-    # Placeholder: no owner feedback system yet → neutral 0.7
-    layer4 = 0.7 if interactions > 0 else 0.0
+    # ── Layer 4: Track Record (10%) ──
+    # More data = more confidence in the score
+    # Scale: 0 records = 0.5 (neutral), 10+ = 0.8, 50+ = 0.95, 100+ = 1.0
+    if interactions >= 100:
+        layer4 = 1.0
+    elif interactions >= 50:
+        layer4 = 0.95
+    elif interactions >= 20:
+        layer4 = 0.9
+    elif interactions >= 10:
+        layer4 = 0.8
+    elif interactions >= 5:
+        layer4 = 0.7
+    elif interactions > 0:
+        layer4 = 0.5
+    else:
+        layer4 = 0.0
 
     # ── Weighted sum → 0-1000 ──
-    weighted_1 = layer1 * 0.40
+    weighted_1 = layer1 * 0.50
     weighted_2 = layer2 * 0.25
-    weighted_3 = layer3 * 0.20
-    weighted_4 = layer4 * 0.15
+    weighted_3 = layer3 * 0.15
+    weighted_4 = layer4 * 0.10
 
     total = weighted_1 + weighted_2 + weighted_3 + weighted_4
     trust_score = round(total * 1000)
-
-    # Clamp
     trust_score = max(0, min(1000, trust_score))
 
     return {
         "trust_score": trust_score,
         "layers": {
-            "behavioral_reliability": {"score": round(layer1, 4), "weight": 0.40, "weighted": round(weighted_1, 4)},
-            "consistency":            {"score": round(layer2, 4), "weight": 0.25, "weighted": round(weighted_2, 4)},
-            "transparency":           {"score": round(layer3, 4), "weight": 0.20, "weighted": round(weighted_3, 4)},
-            "external_validation":    {"score": round(layer4, 4), "weight": 0.15, "weighted": round(weighted_4, 4)},
+            "task_completion":     {"score": round(layer1, 4), "weight": 0.50, "weighted": round(weighted_1, 4)},
+            "response_quality":    {"score": round(layer2, 4), "weight": 0.25, "weighted": round(weighted_2, 4)},
+            "evidence_integrity":  {"score": round(layer3, 4), "weight": 0.15, "weighted": round(weighted_3, 4)},
+            "track_record":        {"score": round(layer4, 4), "weight": 0.10, "weighted": round(weighted_4, 4)},
         },
         "raw_scores": raw,
     }
