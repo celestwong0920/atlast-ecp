@@ -78,9 +78,10 @@ def flush_stale_buffers(timeout_s: int = 0) -> int:
                 tool_summary[name] = tool_summary.get(name, 0) + 1
             summary_str = ", ".join(f"{name} x{count}" for name, count in tool_summary.items())
 
-            # Try to read Claude Code transcript for real user message + agent response
+            # Try to read Claude Code transcript for real user message + agent response + model
             user_input = None
             agent_response = None
+            transcript_model = None
             transcript_path = buf.get("transcript_path", "")
             message_index = buf.get("user_message_count", 1) - 1  # 0-based index
             if transcript_path:
@@ -102,26 +103,25 @@ def flush_stale_buffers(timeout_s: int = 0) -> int:
                                 if isinstance(c, str) and len(c.strip()) > 0 and not c.startswith("<"):
                                     user_msgs.append({"idx": i, "text": c})
 
-                        # Collect assistant text responses
-                        asst_msgs = []
-                        for i, e in enumerate(entries):
-                            if e.get("type") == "assistant":
-                                content = e.get("message", {}).get("content", [])
-                                if isinstance(content, list):
-                                    texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
-                                    if texts:
-                                        asst_msgs.append({"idx": i, "text": "\n".join(texts)})
-
                         # Match by index: the Nth user message corresponds to the Nth conversation
                         if 0 <= message_index < len(user_msgs):
                             um = user_msgs[message_index]
                             next_idx = user_msgs[message_index + 1]["idx"] if message_index + 1 < len(user_msgs) else len(entries)
                             user_input = um["text"][:1000]
-                            # Find last assistant response in this block
-                            for ar in reversed(asst_msgs):
-                                if um["idx"] < ar["idx"] < next_idx:
-                                    agent_response = ar["text"][:3000]
-                                    break
+                            # Find last assistant response + model in this block
+                            for i in range(next_idx - 1, um["idx"], -1):
+                                e = entries[i]
+                                if e.get("type") == "assistant":
+                                    msg = e.get("message", {})
+                                    if not transcript_model:
+                                        transcript_model = msg.get("model")
+                                    content = msg.get("content", [])
+                                    if isinstance(content, list) and not agent_response:
+                                        texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                                        if texts:
+                                            agent_response = "\n".join(texts)[:3000]
+                                    if agent_response and transcript_model:
+                                        break
                 except Exception:
                     pass
 
@@ -159,7 +159,7 @@ def flush_stale_buffers(timeout_s: int = 0) -> int:
                 output_content=output_json,
                 agent="claude-code",
                 action="session",
-                model="claude",
+                model=transcript_model or "claude",
                 latency_ms=total_latency,
             )
 
