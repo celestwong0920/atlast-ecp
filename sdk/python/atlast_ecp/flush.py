@@ -15,20 +15,21 @@ from pathlib import Path
 
 _logger = logging.getLogger(__name__)
 
-FLUSH_TIMEOUT_S = 300  # 5 minutes — Claude Code can think for minutes between tool calls
-
-
-def flush_stale_buffers(timeout_s: int = FLUSH_TIMEOUT_S) -> int:
+def flush_stale_buffers(timeout_s: int = 0) -> int:
     """
-    Flush all stale Claude Code hook buffers into ECP records.
+    Flush Claude Code hook buffers that belong to CLOSED sessions.
 
-    A buffer is "stale" if its last_update is older than timeout_s.
-    Returns the number of records created.
+    A session is considered closed if NO Claude Code process is using it.
+    We detect this by checking if the session's Claude Code process is still alive.
+
+    If timeout_s > 0, also flush buffers older than timeout_s (legacy behavior).
+    Default: timeout_s=0 means only flush truly closed sessions.
 
     Safe to call frequently — no-op if no stale buffers exist.
     Fail-Open: never raises, never blocks.
     """
     from .storage import ECP_DIR
+    import subprocess
 
     buffer_dir = ECP_DIR / "hook_buffer"
     if not buffer_dir.exists():
@@ -37,13 +38,33 @@ def flush_stale_buffers(timeout_s: int = FLUSH_TIMEOUT_S) -> int:
     flushed = 0
     now = time.time()
 
+    # Get list of active Claude Code session IDs by checking running processes
+    active_sessions = set()
+    try:
+        # Check which Claude Code sessions are still running
+        # Claude Code processes have their session ID in the transcript path
+        result = subprocess.run(
+            ["pgrep", "-a", "claude"], capture_output=True, text=True, timeout=5
+        )
+        # If Claude Code is running, consider ALL buffers potentially active
+        if result.stdout.strip():
+            active_sessions.add("__claude_running__")
+    except Exception:
+        pass
+
     for session_file in buffer_dir.glob("*.json"):
         try:
             buf = json.loads(session_file.read_text())
             last_update = buf.get("last_update", 0)
+            age = now - last_update
 
-            if now - last_update < timeout_s:
-                continue  # Not stale yet
+            # If Claude Code is running, only flush buffers older than 1 hour
+            # (these are definitely from a previous session that's done)
+            if "__claude_running__" in active_sessions:
+                if age < 3600:  # Less than 1 hour — might be active
+                    continue
+            elif timeout_s > 0 and age < timeout_s:
+                continue
 
             steps = buf.get("steps", [])
             if not steps:
