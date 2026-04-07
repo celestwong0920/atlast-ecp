@@ -345,22 +345,30 @@ def calculate_scores(
 
 def compute_trust_score_1000(classified_records: list[dict], chain_integrity: float = 1.0) -> dict:
     """
-    Compute ATLAST Trust Score (0-1000).
+    Compute ATLAST Trust Score (0-1000) — Confidence-Based Scoring.
 
-    Fair scoring principle: ONLY score what the agent can control.
-    Infra errors, API latency, provider billing — NOT the agent's fault.
+    Core principle: Trust is EARNED through proven work, not assumed.
+    A new agent starts at 500 (unknown). Score rises with successful work
+    and data volume. More usage = higher potential score (not lower).
 
-    Four signal layers:
-      Layer 1: Task Completion (50%)       — did the agent complete the task?
-      Layer 2: Response Quality (25%)      — quality and consistency of responses
-      Layer 3: Evidence Integrity (15%)    — chain integrity, recording coverage
-      Layer 4: Track Record (10%)          — history depth and stability
+    Three signal layers:
+      Layer 1: Proven Reliability (70%)    — Bayesian success rate
+      Layer 2: Evidence Integrity (15%)    — chain completeness
+      Layer 3: Activity Confidence (15%)   — how much data backs the score
+
+    Bayesian approach (Layer 1):
+      score = (successes + prior) / (total + prior_total)
+      Prior: 5 successes out of 10 (50% = "unknown")
+      - 0 interactions: 5/10 = 0.5 (neutral)
+      - 100 interactions, 0 errors: 105/110 = 0.95 (proven reliable)
+      - 1000 interactions, 50 errors: 955/1010 = 0.95 (still excellent)
+      - 10 interactions, 5 errors: 10/20 = 0.5 (concerning)
 
     What does NOT affect score:
-      - high_latency: API/model speed is not the agent's fault
-      - hedge_rate: cautious language ("I think", "maybe") is responsible behavior
-      - infra_error: provider outages are not the agent's fault
-      - system_error: billing/quota issues are the user's fault
+      - high_latency: API/model speed is the provider's issue
+      - hedge_rate: cautious language is responsible, not a flaw
+      - infra_error/system_error: not the agent's fault
+      - incomplete (when due to tool limitations): honest behavior
 
     Returns:
         {
@@ -371,66 +379,54 @@ def compute_trust_score_1000(classified_records: list[dict], chain_integrity: fl
     """
     raw = calculate_scores(classified_records)
     interactions = raw["interactions"]
+    error_rate = raw.get("error_rate", 0.0)
 
-    # ── Layer 1: Task Completion (50%) ──
-    # Only count AGENT errors (not infra, not provider, not user)
-    # Completion = agent gave a response without crashing
-    reliability = raw.get("reliability", 1.0)  # already excludes infra errors
-    error_rate = raw.get("error_rate", 0.0)    # only agent errors
+    # Count actual agent successes and failures
+    agent_errors = round(error_rate * interactions) if interactions else 0
+    successes = interactions - agent_errors
 
-    # Completion score: 100% if no agent errors, scales down with errors
-    layer1 = reliability
+    # ── Layer 1: Proven Reliability (70%) ──
+    # Bayesian estimate with prior (5 successes / 10 total = 50% prior)
+    # This naturally handles the volume-quality tradeoff:
+    # - Few interactions → pulled toward 50% (uncertain)
+    # - Many interactions → approaches actual success rate
+    # - More data always helps if quality is maintained
+    PRIOR_SUCCESSES = 5
+    PRIOR_TOTAL = 10
+    layer1 = (successes + PRIOR_SUCCESSES) / (interactions + PRIOR_TOTAL)
 
-    # ── Layer 2: Response Quality (25%) ──
-    # incomplete_rate: only counts records where agent explicitly gave up
-    # (NOT "I cannot access" which is a tool limitation, only true failures)
-    incomplete_rate = raw.get("incomplete_rate", 0.0)
+    # ── Layer 2: Evidence Integrity (15%) ──
+    # Chain completeness ratio (0.0-1.0)
+    # Measures protocol integrity, not agent behavior
+    layer2 = chain_integrity
 
-    # Quality = 1.0 minus genuine incomplete responses
-    # hedge_rate is NOT penalized — cautious language is responsible behavior
-    layer2 = max(0, 1.0 - incomplete_rate)
-
-    # ── Layer 3: Evidence Integrity (15%) ──
-    # Chain integrity: are all records properly linked?
-    # This measures the PROTOCOL's integrity, not the agent
-    # Use the chain_integrity passed in (from signals or dashboard)
-    layer3 = chain_integrity
-
-    # ── Layer 4: Track Record (10%) ──
-    # More data = more confidence in the score
-    # Scale: 0 records = 0.5 (neutral), 10+ = 0.8, 50+ = 0.95, 100+ = 1.0
-    if interactions >= 100:
-        layer4 = 1.0
-    elif interactions >= 50:
-        layer4 = 0.95
-    elif interactions >= 20:
-        layer4 = 0.9
-    elif interactions >= 10:
-        layer4 = 0.8
-    elif interactions >= 5:
-        layer4 = 0.7
-    elif interactions > 0:
-        layer4 = 0.5
+    # ── Layer 3: Activity Confidence (15%) ──
+    # How much data backs this score? More interactions = higher confidence.
+    # Logarithmic scale: diminishing returns after ~100 interactions.
+    import math
+    if interactions <= 0:
+        layer3 = 0.0
+    elif interactions >= 1000:
+        layer3 = 1.0
     else:
-        layer4 = 0.0
+        # log curve: 10→0.5, 50→0.78, 100→0.87, 500→0.97
+        layer3 = min(1.0, math.log10(interactions) / 3.0)
 
     # ── Weighted sum → 0-1000 ──
-    weighted_1 = layer1 * 0.50
-    weighted_2 = layer2 * 0.25
+    weighted_1 = layer1 * 0.70
+    weighted_2 = layer2 * 0.15
     weighted_3 = layer3 * 0.15
-    weighted_4 = layer4 * 0.10
 
-    total = weighted_1 + weighted_2 + weighted_3 + weighted_4
+    total = weighted_1 + weighted_2 + weighted_3
     trust_score = round(total * 1000)
     trust_score = max(0, min(1000, trust_score))
 
     return {
         "trust_score": trust_score,
         "layers": {
-            "task_completion":     {"score": round(layer1, 4), "weight": 0.50, "weighted": round(weighted_1, 4)},
-            "response_quality":    {"score": round(layer2, 4), "weight": 0.25, "weighted": round(weighted_2, 4)},
-            "evidence_integrity":  {"score": round(layer3, 4), "weight": 0.15, "weighted": round(weighted_3, 4)},
-            "track_record":        {"score": round(layer4, 4), "weight": 0.10, "weighted": round(weighted_4, 4)},
+            "proven_reliability":   {"score": round(layer1, 4), "weight": 0.70, "weighted": round(weighted_1, 4)},
+            "evidence_integrity":   {"score": round(layer2, 4), "weight": 0.15, "weighted": round(weighted_2, 4)},
+            "activity_confidence":  {"score": round(layer3, 4), "weight": 0.15, "weighted": round(weighted_3, 4)},
         },
         "raw_scores": raw,
     }
