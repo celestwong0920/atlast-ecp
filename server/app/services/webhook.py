@@ -109,3 +109,83 @@ async def fire_attestation_webhook(
     from ..routes.metrics import webhook_total
     webhook_total.labels(status="failed").inc()
     return False
+
+
+async def fire_batch_uploaded_webhook(
+    *,
+    batch_id: str,
+    agent_did: str,
+    merkle_root: str,
+    record_count: int,
+    record_hashes: list[str] | None = None,
+    flag_counts: dict | None = None,
+    chain_integrity: float | None = None,
+    avg_latency_ms: int | None = None,
+) -> bool:
+    """POST webhook to LLaChat when a batch is stored (before anchoring).
+
+    This notifies LLaChat immediately when new ECP data arrives,
+    so it can update Trust Scores without waiting for on-chain anchoring.
+    """
+    url = settings.ECP_WEBHOOK_URL
+    if not url:
+        logger.debug("batch_webhook_skipped", reason="ECP_WEBHOOK_URL not configured")
+        return False
+
+    payload = {
+        "event": "batch.uploaded",
+        "batch_id": batch_id,
+        "agent_did": agent_did,
+        "merkle_root": merkle_root,
+        "record_count": record_count,
+        "chain_id": CHAIN_ID,
+        "on_chain": False,  # Not yet anchored
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if record_hashes is not None:
+        payload["record_hashes"] = record_hashes
+    if flag_counts is not None:
+        payload["flag_counts"] = flag_counts
+    if chain_integrity is not None:
+        payload["chain_integrity"] = chain_integrity
+    if avg_latency_ms is not None:
+        payload["avg_latency_ms"] = avg_latency_ms
+
+    payload_bytes = json_lib.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+
+    signature = hmac.new(
+        settings.ECP_WEBHOOK_TOKEN.encode(),
+        payload_bytes,
+        hashlib.sha256,
+    ).hexdigest()
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-ECP-Signature": f"sha256={signature}",
+    }
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, content=payload_bytes, headers=headers)
+                resp.raise_for_status()
+                logger.info("batch_uploaded_webhook_sent", batch_id=batch_id, status=resp.status_code)
+                from ..routes.metrics import webhook_total
+                webhook_total.labels(status="success").inc()
+                return True
+        except Exception as e:
+            logger.warning("batch_uploaded_webhook_failed", batch_id=batch_id, attempt=attempt + 1, error=str(e))
+            if attempt < max_retries - 1:
+                import asyncio
+                await asyncio.sleep(2 ** attempt)
+
+    from .monitoring import capture_error
+    capture_error(
+        RuntimeError(f"batch.uploaded webhook exhausted for {batch_id}"),
+        {"context": "batch_webhook", "batch_id": batch_id},
+    )
+    from ..routes.metrics import webhook_total
+    webhook_total.labels(status="failed").inc()
+    return False

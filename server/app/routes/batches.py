@@ -220,6 +220,20 @@ async def upload_batch(
                 from .metrics import batch_upload_total, batch_upload_size
                 batch_upload_total.labels(status="success").inc()
                 batch_upload_size.observe(req.record_count)
+
+                # Fire batch.uploaded webhook (notify LLaChat immediately)
+                import asyncio
+                from ..services.webhook import fire_batch_uploaded_webhook
+                asyncio.create_task(fire_batch_uploaded_webhook(
+                    batch_id=batch_id,
+                    agent_did=req.agent_did,
+                    merkle_root=req.merkle_root,
+                    record_count=req.record_count,
+                    record_hashes=req.record_hashes,
+                    flag_counts=req.flag_counts,
+                    chain_integrity=req.chain_integrity,
+                    avg_latency_ms=req.avg_latency_ms,
+                ))
         except Exception as e:
             logger.error("batch_store_failed", error=str(e), did=req.agent_did)
             from .metrics import batch_upload_total
