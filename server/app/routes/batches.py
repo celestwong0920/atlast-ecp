@@ -226,6 +226,7 @@ async def upload_batch(
             batch_upload_size.observe(req.record_count)
 
             # Fire batch.uploaded webhook (notify LLaChat immediately)
+            logger.info("firing_batch_uploaded_webhook", batch_id=batch_id, url=settings.ECP_WEBHOOK_URL, agent_did=req.agent_did)
             import asyncio
             from ..services.webhook import fire_batch_uploaded_webhook
             asyncio.create_task(fire_batch_uploaded_webhook(

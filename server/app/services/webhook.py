@@ -128,8 +128,10 @@ async def fire_batch_uploaded_webhook(
     so it can update Trust Scores without waiting for on-chain anchoring.
     """
     url = settings.ECP_WEBHOOK_URL
+    token = settings.ECP_WEBHOOK_TOKEN
+    logger.info("batch_uploaded_webhook_start", batch_id=batch_id, url=url, has_token=bool(token), agent_did=agent_did)
     if not url:
-        logger.debug("batch_webhook_skipped", reason="ECP_WEBHOOK_URL not configured")
+        logger.warning("batch_webhook_skipped", reason="ECP_WEBHOOK_URL not configured")
         return False
 
     payload = {
