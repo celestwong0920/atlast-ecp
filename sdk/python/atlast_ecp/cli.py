@@ -962,15 +962,35 @@ def _ask_backup_location():
 
 
 def _auto_register(identity: dict):
-    """Auto-register agent with ATLAST server during init."""
+    """Auto-register agent with ATLAST server during init.
+    Saves API key to config on success.
+    Handles re-registration with ownership_sig for existing DIDs.
+    """
     import urllib.request
+    import time as _time
     from .config import get_api_url, save_config
+    from .identity import sign as _sign
 
     server_url = get_api_url()
     did = identity["did"]
-    pub_key = identity.get("crypto_pub_key") or identity["pub_key"]
+    pub_key = identity.get("crypto_pub_key") or identity.get("pub_key", "")
 
-    payload = json.dumps({"did": did, "public_key": pub_key}).encode()
+    # Generate ownership signature for re-registration
+    ownership_ts = str(int(_time.time()))
+    ownership_sig = None
+    try:
+        sig_result = _sign(identity, f"register:{did}:{ownership_ts}")
+        if sig_result and sig_result.startswith("ed25519:"):
+            ownership_sig = sig_result[len("ed25519:"):]
+    except Exception:
+        pass
+
+    body: dict = {"did": did, "public_key": pub_key, "ecp_version": "0.1"}
+    if ownership_sig:
+        body["ownership_sig"] = ownership_sig
+        body["ownership_ts"] = ownership_ts
+
+    payload = json.dumps(body).encode()
     req = urllib.request.Request(
         f"{server_url}/agents/register",
         data=payload,
@@ -981,15 +1001,16 @@ def _auto_register(identity: dict):
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-            api_key = data.get("api_key") or data.get("key")
+            # Server returns "agent_api_key" (not "api_key" or "key")
+            api_key = data.get("agent_api_key") or data.get("api_key") or data.get("key", "")
+            config_data = {"agent_did": did, "endpoint": server_url}
             if api_key:
-                save_config({"agent_api_key": api_key, "agent_did": did, "endpoint": server_url})
-                print(f"  ✅ Registered: {did}")
-                print(f"  🔑 API Key: {api_key[:12]}...{api_key[-4:]} (saved to config)")
+                config_data["agent_api_key"] = api_key
+            save_config(config_data)
     except Exception as e:
         error_str = str(e)
-        if "409" in error_str:
-            print(f"  ✓ Already registered: {did}")
+        if "409" in error_str or "403" in error_str:
+            # Already registered — save DID but we may not have the key
             save_config({"agent_did": did, "endpoint": server_url})
         else:
             raise
