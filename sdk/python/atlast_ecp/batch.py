@@ -156,7 +156,7 @@ def _build_record_hashes_payload(records: list[dict]) -> list[dict]:
     for r in records:
         record_id = r.get("id", "")
         chain_hash = r.get("chain", {}).get("hash", "")
-        flags = r.get("step", {}).get("flags", [])
+        flags = r.get("step", {}).get("flags") or r.get("meta", {}).get("flags", [])
         # Only include records with valid ids and hashes
         if record_id.startswith("rec_") and chain_hash.startswith("sha256:"):
             entry = {"id": record_id, "hash": chain_hash, "flags": flags}
@@ -178,7 +178,7 @@ def _aggregate_flag_counts(records: list[dict]) -> dict:
     """
     counts: dict[str, int] = {}
     for r in records:
-        flags = r.get("step", {}).get("flags", [])
+        flags = r.get("step", {}).get("flags") or r.get("meta", {}).get("flags", [])
         for flag in flags:
             counts[flag] = counts.get(flag, 0) + 1
     return counts
@@ -197,11 +197,30 @@ def _ensure_agent_registered(identity: dict) -> bool:
         return True
 
     try:
-        payload = json.dumps({
-            "did": identity["did"],
-            "public_key": identity["pub_key"],
+        did = identity["did"]
+        pub_key = identity.get("crypto_pub_key") or identity.get("pub_key", "")
+
+        # Generate ownership signature for re-registration
+        import time as _reg_time
+        ownership_ts = str(int(_reg_time.time()))
+        ownership_sig = None
+        try:
+            sig_result = sign_data(identity, f"register:{did}:{ownership_ts}")
+            if sig_result and sig_result.startswith("ed25519:"):
+                ownership_sig = sig_result[len("ed25519:"):]
+        except Exception:
+            pass
+
+        body: dict = {
+            "did": did,
+            "public_key": pub_key,
             "ecp_version": "0.1",
-        }).encode("utf-8")
+        }
+        if ownership_sig:
+            body["ownership_sig"] = ownership_sig
+            body["ownership_ts"] = ownership_ts
+
+        payload = json.dumps(body).encode("utf-8")
 
         for attempt in range(3):
             try:
@@ -220,7 +239,7 @@ def _ensure_agent_registered(identity: dict) -> bool:
                     _save_batch_state(state)
                     if result.get("agent_api_key"):
                         save_config({
-                            "agent_did": identity["did"],
+                            "agent_did": did,
                             "agent_api_key": result["agent_api_key"],
                             "endpoint": _get_api_url(),
                         })
@@ -231,6 +250,9 @@ def _ensure_agent_registered(identity: dict) -> bool:
                     state["agent_registered"] = True
                     _save_batch_state(state)
                     return True
+                if e.code == 403 and ownership_sig:
+                    # Re-registration failed — ownership sig might be wrong
+                    break
                 if 400 <= e.code < 500:
                     break  # Permanent client error — don't retry
             except (urllib.error.URLError, TimeoutError, OSError):
@@ -395,9 +417,9 @@ def run_batch(flush: bool = False):
 
             # Compute stats
             latencies = [
-                r.get("step", {}).get("latency_ms", 0)
+                r.get("step", {}).get("latency_ms") or r.get("meta", {}).get("latency_ms", 0)
                 for r in records
-                if r.get("step", {}).get("latency_ms")
+                if r.get("step", {}).get("latency_ms") or r.get("meta", {}).get("latency_ms")
             ]
             avg_latency = int(sum(latencies) / len(latencies)) if latencies else 0
             batch_ts = int(time.time() * 1000)  # Unix ms
