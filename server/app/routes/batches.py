@@ -143,7 +143,8 @@ async def upload_batch(
                             public_key = Ed25519PublicKey.from_public_bytes(pub_bytes)
                             public_key.verify(sig_bytes, req.merkle_root.encode())
                         except ImportError:
-                            pass  # No cryptography package — skip verification
+                            logger.critical("cryptography_package_missing", detail="Cannot verify batch signatures")
+                            raise HTTPException(status_code=500, detail="Server misconfigured: cryptography package required")
                         except Exception:
                             logger.warning("batch_sig_invalid", did=req.agent_did)
                             raise HTTPException(
@@ -175,7 +176,7 @@ async def upload_batch(
             from datetime import timedelta
             from ..db.models import Batch as BatchModel
             async with session:
-                cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
                 dup = await session.execute(
                     select(BatchModel.batch_id).where(
                         and_(
@@ -190,57 +191,60 @@ async def upload_batch(
                     return BatchUploadResponse(
                         batch_id=existing,
                         status="duplicate",
-                        message="Identical batch already submitted within the last 5 minutes.",
+                        message="Identical batch already submitted within the last 24 hours.",
                     )
         except Exception as e:
             logger.warning("dedup_check_failed", error=str(e))
 
     # Store in DB
     session = await get_session()
-    if session is not None:
-        try:
-            async with session:
-                batch = Batch(
-                    batch_id=batch_id,
-                    agent_did=req.agent_did,
-                    merkle_root=req.merkle_root,
-                    record_count=req.record_count,
-                    avg_latency_ms=req.avg_latency_ms,
-                    batch_ts=req.batch_ts,
-                    sig=req.sig,
-                    ecp_version=req.ecp_version,
-                    record_hashes=req.record_hashes,
-                    flag_counts=req.flag_counts,
-                    chain_integrity=req.chain_integrity,
-                    status="pending",
-                )
-                session.add(batch)
-                await session.commit()
-                logger.info("batch_stored", batch_id=batch_id, did=req.agent_did, records=req.record_count)
-                from .metrics import batch_upload_total, batch_upload_size
-                batch_upload_total.labels(status="success").inc()
-                batch_upload_size.observe(req.record_count)
-
-                # Fire batch.uploaded webhook (notify LLaChat immediately)
-                import asyncio
-                from ..services.webhook import fire_batch_uploaded_webhook
-                asyncio.create_task(fire_batch_uploaded_webhook(
-                    batch_id=batch_id,
-                    agent_did=req.agent_did,
-                    merkle_root=req.merkle_root,
-                    record_count=req.record_count,
-                    record_hashes=req.record_hashes,
-                    flag_counts=req.flag_counts,
-                    chain_integrity=req.chain_integrity,
-                    avg_latency_ms=req.avg_latency_ms,
-                ))
-        except Exception as e:
-            logger.error("batch_store_failed", error=str(e), did=req.agent_did)
-            from .metrics import batch_upload_total
-            batch_upload_total.labels(status="failure").inc()
-            raise HTTPException(status_code=500, detail="Failed to store batch")
-    else:
+    if session is None:
         logger.warning("batch_no_db", batch_id=batch_id)
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        async with session:
+            batch = Batch(
+                batch_id=batch_id,
+                agent_did=req.agent_did,
+                merkle_root=req.merkle_root,
+                record_count=req.record_count,
+                avg_latency_ms=req.avg_latency_ms,
+                batch_ts=req.batch_ts,
+                sig=req.sig,
+                ecp_version=req.ecp_version,
+                record_hashes=req.record_hashes,
+                flag_counts=req.flag_counts,
+                chain_integrity=req.chain_integrity,
+                status="pending",
+            )
+            session.add(batch)
+            await session.commit()
+            logger.info("batch_stored", batch_id=batch_id, records=req.record_count)
+            from .metrics import batch_upload_total, batch_upload_size
+            batch_upload_total.labels(status="success").inc()
+            batch_upload_size.observe(req.record_count)
+
+            # Fire batch.uploaded webhook (notify LLaChat immediately)
+            import asyncio
+            from ..services.webhook import fire_batch_uploaded_webhook
+            asyncio.create_task(fire_batch_uploaded_webhook(
+                batch_id=batch_id,
+                agent_did=req.agent_did,
+                merkle_root=req.merkle_root,
+                record_count=req.record_count,
+                record_hashes=req.record_hashes,
+                flag_counts=req.flag_counts,
+                chain_integrity=req.chain_integrity,
+                avg_latency_ms=req.avg_latency_ms,
+            ))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("batch_store_failed", error=str(e))
+        from .metrics import batch_upload_total
+        batch_upload_total.labels(status="failure").inc()
+        raise HTTPException(status_code=500, detail="Failed to store batch")
 
     # Also forward to LLaChat if configured (backward compatibility)
     # This runs fire-and-forget — don't block the response

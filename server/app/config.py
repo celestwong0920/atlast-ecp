@@ -40,3 +40,16 @@ class Settings:
 
 
 settings = Settings()
+
+# Production safety checks
+if settings.ENVIRONMENT == "production":
+    if not settings.EAS_PRIVATE_KEY and settings.EAS_STUB_MODE != "true":
+        raise ValueError(
+            "CRITICAL: EAS_PRIVATE_KEY must be set in production when EAS_STUB_MODE is not 'true'. "
+            "Server cannot start without it — on-chain anchoring would silently fail."
+        )
+    if not settings.DATABASE_URL:
+        raise ValueError(
+            "CRITICAL: DATABASE_URL must be set in production. "
+            "Server cannot store batches without a database."
+        )
