@@ -425,6 +425,20 @@ def cmd_register(args: list[str]):
 
     print("\n🔗 Registering Agent...")
 
+    # Generate ownership signature for re-registration (proves key ownership)
+    # Server expects: ed25519 hex signature over "register:{did}:{timestamp}"
+    import time as _time
+    ownership_ts = str(int(_time.time()))
+    ownership_sig = None
+    try:
+        from .identity import sign as _sign_data
+        sig_result = _sign_data(identity, f"register:{did}:{ownership_ts}")
+        # Strip "ed25519:" prefix — server expects raw hex
+        if sig_result and sig_result.startswith("ed25519:"):
+            ownership_sig = sig_result[len("ed25519:"):]
+    except Exception:
+        pass  # Fallback: first-time registration doesn't need sig
+
     body: dict = {
         "did": did,
         "public_key": pub_key,
@@ -432,6 +446,9 @@ def cmd_register(args: list[str]):
     }
     if display_name:
         body["display_name"] = display_name
+    if ownership_sig:
+        body["ownership_sig"] = ownership_sig
+        body["ownership_ts"] = ownership_ts
 
     payload = json.dumps(body).encode()
 
