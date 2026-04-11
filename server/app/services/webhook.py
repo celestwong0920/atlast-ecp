@@ -157,7 +157,7 @@ async def fire_batch_uploaded_webhook(
     payload_bytes = json_lib.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
 
     signature = hmac.new(
-        settings.ECP_WEBHOOK_TOKEN.encode(),
+        token.encode(),
         payload_bytes,
         hashlib.sha256,
     ).hexdigest()
@@ -166,6 +166,13 @@ async def fire_batch_uploaded_webhook(
         "Content-Type": "application/json",
         "X-ECP-Signature": f"sha256={signature}",
     }
+
+    logger.info("batch_webhook_debug",
+        sig_prefix=signature[:16],
+        body_len=len(payload_bytes),
+        token_len=len(token),
+        body_preview=payload_bytes[:100].decode(),
+    )
 
     max_retries = 3
     for attempt in range(max_retries):
