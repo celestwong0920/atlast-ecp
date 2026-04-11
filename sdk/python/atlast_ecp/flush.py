@@ -15,6 +15,34 @@ from pathlib import Path
 
 _logger = logging.getLogger(__name__)
 
+
+def _is_process_running(name: str) -> bool:
+    """Cross-platform check if a process with `name` in its cmdline is running."""
+    import subprocess, sys
+    try:
+        if sys.platform == "win32":
+            # Windows: use tasklist + findstr (always available)
+            result = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {name}*", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=5,
+            )
+            # tasklist returns "INFO: No tasks..." when not found
+            return name.lower() in result.stdout.lower() and "no tasks" not in result.stdout.lower()
+        else:
+            # macOS / Linux: pgrep
+            result = subprocess.run(
+                ["pgrep", "-a", name], capture_output=True, text=True, timeout=5,
+            )
+            return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _is_claude_code_running() -> bool:
+    """Check if any Claude Code process is currently active."""
+    return _is_process_running("claude")
+
+
 def flush_stale_buffers(timeout_s: int = 0) -> int:
     """
     Flush Claude Code hook buffers that belong to CLOSED sessions.
@@ -41,13 +69,7 @@ def flush_stale_buffers(timeout_s: int = 0) -> int:
     # Get list of active Claude Code session IDs by checking running processes
     active_sessions = set()
     try:
-        # Check which Claude Code sessions are still running
-        # Claude Code processes have their session ID in the transcript path
-        result = subprocess.run(
-            ["pgrep", "-a", "claude"], capture_output=True, text=True, timeout=5
-        )
-        # If Claude Code is running, consider ALL buffers potentially active
-        if result.stdout.strip():
+        if _is_claude_code_running():
             active_sessions.add("__claude_running__")
     except Exception:
         pass

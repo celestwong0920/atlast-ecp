@@ -732,11 +732,19 @@ from atlast_ecp.proxy import run_proxy
 run_proxy(port={proxy_port}, agent="{agent_name}")
 """
     try:
+        import tempfile
+        log_dir = Path(tempfile.gettempdir())
+        popen_kwargs: dict = {
+            "stdout": open(log_dir / "atlast-proxy.log", "a"),
+            "stderr": open(log_dir / "atlast-proxy-err.log", "a"),
+        }
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             [python_bin, "-c", proxy_script],
-            stdout=open("/tmp/atlast-proxy.log", "a"),
-            stderr=open("/tmp/atlast-proxy-err.log", "a"),
-            start_new_session=True,
+            **popen_kwargs,
         )
         # Wait briefly to check it started
         import time
@@ -800,9 +808,9 @@ run_proxy(port={proxy_port}, agent="{agent_name}")
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/atlast-proxy.log</string>
+    <string>{Path(tempfile.gettempdir()) / 'atlast-proxy.log'}</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/atlast-proxy-err.log</string>
+    <string>{Path(tempfile.gettempdir()) / 'atlast-proxy-err.log'}</string>
 </dict>
 </plist>"""
             plist_path.write_text(plist_content)
@@ -1993,9 +2001,16 @@ def cmd_doctor(args: list[str]):
 
     # 9. Proxy status — detect by checking for running atlast proxy process
     try:
+        from .flush import _is_process_running
         import subprocess as _sp
-        result = _sp.run(["pgrep", "-f", "atlast_ecp.proxy"], capture_output=True, timeout=3)
-        if result.returncode == 0:
+        proxy_running = False
+        if sys.platform == "win32":
+            # Windows: check via netstat for proxy port or tasklist
+            proxy_running = _is_process_running("python")  # best-effort
+        else:
+            result = _sp.run(["pgrep", "-f", "atlast_ecp.proxy"], capture_output=True, timeout=3)
+            proxy_running = result.returncode == 0
+        if proxy_running:
             print("  ✅ Proxy: running (recording real API calls)")
         else:
             print("  ⚠️  Proxy: not running — run 'atlast init' to auto-start")
