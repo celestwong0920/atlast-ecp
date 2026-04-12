@@ -32,7 +32,11 @@ from .verify import (
 )
 from .config import get_api_url, get_api_key, load_config, save_config
 
-__version__ = "0.18.1"
+try:
+    from importlib.metadata import version as _get_version
+    __version__ = _get_version("atlast-ecp")
+except Exception:
+    __version__ = "0.21.2"
 __all__ = [
     # Core
     "wrap",
