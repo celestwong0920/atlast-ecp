@@ -1338,7 +1338,7 @@ def main():
             pass
     _log("Agent name: %s" % agent_name)
 
-    # Record!
+    # Record main conversation
     try:
         from atlast_ecp.core import record_minimal
         record_minimal(
@@ -1349,9 +1349,93 @@ def main():
             model=last_model or "claude",
             latency_ms=int(data.get("duration_ms", 0)),
         )
-        _log(f"SUCCESS: recorded conversation")
+        _log("SUCCESS: recorded main conversation")
     except Exception as e:
-        _log(f"ERROR recording: {e}")
+        _log("ERROR recording main: %s" % e)
+
+    # Record subagent activity
+    # Subagents are at: {session_dir}/subagents/agent-*.jsonl
+    if transcript_path:
+        try:
+            session_dir = transcript_path.parent
+            subagent_dir = session_dir / "subagents"
+            if subagent_dir.exists():
+                sa_dedup_file = ecp_dir / "hook_buffer" / "_subagents_recorded.json"
+                sa_recorded = {}
+                if sa_dedup_file.exists():
+                    try: sa_recorded = json.loads(sa_dedup_file.read_text())
+                    except: pass
+
+                for sa_file in sorted(subagent_dir.glob("agent-*.jsonl")):
+                    sa_key = sa_file.name
+                    sa_size = sa_file.stat().st_size
+                    # Skip if already recorded at this size
+                    if sa_recorded.get(sa_key) == sa_size:
+                        continue
+
+                    sa_entries = []
+                    for line in sa_file.read_text().splitlines():
+                        if line.strip():
+                            try: sa_entries.append(json.loads(line))
+                            except: pass
+
+                    if len(sa_entries) < 2:
+                        continue
+
+                    # Extract subagent prompt (first user message)
+                    sa_prompt = None
+                    for e in sa_entries:
+                        if e.get("type") == "user":
+                            c = e.get("message",{}).get("content","")
+                            if isinstance(c, str) and c.strip():
+                                sa_prompt = c[:1000]
+                            elif isinstance(c, list):
+                                texts = [b.get("text","") for b in c if isinstance(b, dict) and b.get("type") == "text"]
+                                if texts: sa_prompt = " ".join(texts)[:1000]
+                            break
+
+                    # Extract subagent final response
+                    sa_response = None
+                    sa_model = None
+                    sa_tools = []
+                    for e in sa_entries:
+                        if e.get("type") == "assistant":
+                            msg = e.get("message",{})
+                            if not sa_model: sa_model = msg.get("model")
+                            content = msg.get("content",[])
+                            if isinstance(content, list):
+                                for b in content:
+                                    if isinstance(b, dict):
+                                        if b.get("type") == "tool_use":
+                                            sa_tools.append(b.get("name","?"))
+                                        elif b.get("type") == "text" and b.get("text","").strip():
+                                            sa_response = b.get("text","")[:3000]
+
+                    if not sa_prompt:
+                        continue
+
+                    sa_output = sa_response or "(no response)"
+                    if sa_tools:
+                        meta = json.dumps({"_aggregated": True, "steps": len(sa_tools), "tool_names": sa_tools})
+                        sa_output = meta + "\\n" + sa_output
+
+                    try:
+                        record_minimal(
+                            input_content=sa_prompt,
+                            output_content=sa_output,
+                            agent=agent_name + "/subagent",
+                            action="subagent",
+                            model=sa_model or last_model or "claude",
+                            latency_ms=0,
+                        )
+                        sa_recorded[sa_key] = sa_size
+                        _log("SUCCESS: recorded subagent %s (%d tools)" % (sa_key, len(sa_tools)))
+                    except Exception as e:
+                        _log("ERROR recording subagent: %s" % e)
+
+                sa_dedup_file.write_text(json.dumps(sa_recorded))
+        except Exception as e:
+            _log("ERROR scanning subagents: %s" % e)
 
 if __name__ == "__main__":
     main()
