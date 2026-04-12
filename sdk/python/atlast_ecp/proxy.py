@@ -802,6 +802,30 @@ class ATLASTProxy:
         self.port = port
         self.agent = agent
         self.record_count = 0
+        self._app = None
+        self._model_agent_cache = {}  # model → agent name
+
+    def _agent_for_model(self, model: str) -> str:
+        """Derive a distinct agent name from the model.
+
+        E.g. 'z-ai/glm-5.1' → 'glm-5.1'
+             'google/gemma-4-31b-it' → 'gemma-4-31b-it'
+             'claude-3-5-haiku-20241022' → 'claude-3-5-haiku'
+        """
+        if not model:
+            return self.agent
+        if model in self._model_agent_cache:
+            return self._model_agent_cache[model]
+        # Use the part after '/' if present (provider/model format)
+        name = model.split("/")[-1] if "/" in model else model
+        # Remove version suffixes like -20241022
+        import re
+        name = re.sub(r'-\d{8,}$', '', name)
+        # Remove :free suffix
+        name = name.replace(":free", "")
+        self._model_agent_cache[model] = name
+        return name
+        self.record_count = 0
         self._app: Any = None
         self._runner = None
 
@@ -851,7 +875,7 @@ class ATLASTProxy:
             latency_ms = int((time.time() - t_start) * 1000)
             error_msg = json.dumps({"error": f"ATLAST Proxy error: {str(e)}"})
             _record_ecp(req_body, error_msg, request.path, provider,
-                         self.agent, model, latency_ms, http_status=502)
+                         self._agent_for_model(model), model, latency_ms, http_status=502)
             self.record_count += 1
             return web.Response(
                 text=error_msg,
@@ -912,7 +936,7 @@ class ATLASTProxy:
             pass
 
         _record_ecp(req_body, resp_text, request.path, provider,
-                     self.agent, model, latency_ms, tokens_in, tokens_out,
+                     self._agent_for_model(model), model, latency_ms, tokens_in, tokens_out,
                      http_status=resp.status,
                      stop_reason=sync_stop_reason,
                      tool_calls=sync_tool_calls if sync_tool_calls else None,
@@ -954,7 +978,7 @@ class ATLASTProxy:
         full_response = b"".join(chunks)
         sse_result = _reconstruct_sse_content(full_response, provider)
         _record_ecp(req_body, sse_result["content"], request.path, provider,
-                     self.agent, model, latency_ms,
+                     self._agent_for_model(model), model, latency_ms,
                      stop_reason=sse_result.get("stop_reason"),
                      tool_calls=sse_result.get("tool_calls"),
                      is_streaming=True,
