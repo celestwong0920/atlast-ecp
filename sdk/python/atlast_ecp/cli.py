@@ -671,9 +671,13 @@ def cmd_init(args: list[str]):
         _auto_setup_claude_code()
 
         print("\n  ✅ ATLAST ECP is ready!")
-        print("     • Claude Code: restart your session, then it records automatically")
-        print("     • Other agents: set OPENAI_BASE_URL=http://127.0.0.1:5765 and restart")
-        print("     • Dashboard: python3 -m atlast_ecp.cli dashboard")
+        print("")
+        print("  ⚠️  IMPORTANT: You MUST restart your agent for recording to begin:")
+        print("     • Claude Code → quit and reopen (type /exit then run 'claude' again)")
+        print("     • Other agents → kill the process and re-run it")
+        print("     • New terminal → run: source ~/.zshrc")
+        print("")
+        print("  📊 Dashboard: python3 -m atlast_ecp.cli dashboard")
     else:
         print("  Identity: skipped (run 'atlast init' to create DID)")
         print("\n  Next: echo '{\"in\":\"prompt\",\"out\":\"response\"}' | atlast record")
@@ -1084,10 +1088,127 @@ if __name__ == "__main__":
             pass  # Keep venv python as fallback
     hook_command = f"{python_bin} {hook_file}"
 
-    hooks = settings.setdefault("hooks", {})
-    post_hooks = hooks.setdefault("PostToolUse", [])
+    # Also create a Stop hook script that flushes conversation on every response
+    stop_hook_file = plugins_dir / "atlast_ecp_stop_hook.py"
+    stop_hook_file.write_text('''"""ATLAST ECP — Claude Code Stop hook. Fires after EVERY response (including pure chat)."""
+import json, os, sys, time
+from pathlib import Path
 
-    # Add ATLAST hook if not present
+def main():
+    """Read the latest conversation turn from transcript and record it."""
+    try:
+        from atlast_ecp.core import record_minimal
+
+        # Read hook data from stdin
+        try:
+            data = json.load(sys.stdin) if not sys.stdin.isatty() else {}
+        except:
+            data = {}
+
+        # Find transcript — look for the most recent session
+        claude_dir = Path.home() / ".claude" / "projects"
+        transcript_path = None
+        if claude_dir.exists():
+            # Find most recently modified transcript
+            transcripts = []
+            for session_dir in claude_dir.rglob("*.jsonl"):
+                if session_dir.name in ("transcript.jsonl", "history.jsonl"):
+                    continue
+                # Session JSONL files
+            # Actually look for the session transcript directly
+            for proj in claude_dir.iterdir():
+                if proj.is_dir():
+                    for f in sorted(proj.glob("*.jsonl"), key=lambda x: x.stat().st_mtime, reverse=True):
+                        if f.stat().st_size > 100:
+                            transcript_path = f
+                            break
+                if transcript_path:
+                    break
+
+        if not transcript_path or not transcript_path.exists():
+            return  # No transcript found
+
+        # Parse transcript — find the last user message and last assistant response
+        entries = []
+        for line in transcript_path.read_text().splitlines():
+            if line.strip():
+                try:
+                    entries.append(json.loads(line))
+                except:
+                    pass
+
+        if not entries:
+            return
+
+        # Find last user message
+        last_user_msg = None
+        last_assistant_msg = None
+        last_model = None
+        for e in reversed(entries):
+            if e.get("type") == "assistant" and not last_assistant_msg:
+                msg = e.get("message", {})
+                last_model = msg.get("model", "claude")
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                    if texts:
+                        last_assistant_msg = "\\n".join(texts)[:3000]
+            elif e.get("type") == "user" and not last_user_msg:
+                c = e.get("message", {}).get("content", "")
+                if isinstance(c, str) and len(c.strip()) > 0 and not c.startswith("<"):
+                    last_user_msg = c[:1000]
+            if last_user_msg and last_assistant_msg:
+                break
+
+        if not last_user_msg:
+            return
+
+        # Deduplicate: check if we already recorded this exact input recently
+        dedup_file = Path(os.environ.get("ATLAST_ECP_DIR", str(Path.home() / ".ecp"))) / "hook_buffer" / "_last_recorded.txt"
+        dedup_file.parent.mkdir(parents=True, exist_ok=True)
+        dedup_key = f"{last_user_msg[:100]}|{len(entries)}"
+        if dedup_file.exists() and dedup_file.read_text().strip() == dedup_key:
+            return  # Already recorded this turn
+        dedup_file.write_text(dedup_key)
+
+        # Also check hook_buffer for pending tool calls and include them
+        buffer_dir = Path(os.environ.get("ATLAST_ECP_DIR", str(Path.home() / ".ecp"))) / "hook_buffer"
+        tool_count = 0
+        for bf in buffer_dir.glob("*.json"):
+            if bf.name.startswith("_"):
+                continue
+            try:
+                buf = json.loads(bf.read_text())
+                tool_count += len(buf.get("steps", []))
+                bf.unlink(missing_ok=True)
+            except:
+                pass
+
+        output = last_assistant_msg or "(no response)"
+        if tool_count > 0:
+            meta = json.dumps({"_aggregated": True, "steps": tool_count, "tool_names": []})
+            output = meta + "\\n" + output
+
+        record_minimal(
+            input_content=last_user_msg,
+            output_content=output,
+            agent="claude-code",
+            action="conversation",
+            model=last_model or "claude",
+            latency_ms=int(data.get("duration_ms", 0)),
+        )
+    except Exception:
+        pass  # Fail-Open
+
+if __name__ == "__main__":
+    main()
+''')
+    stop_hook_command = f"{python_bin} {stop_hook_file}"
+
+    hooks = settings.setdefault("hooks", {})
+
+    # PostToolUse — buffer tool calls
+    post_hooks = hooks.setdefault("PostToolUse", [])
     if not any("atlast" in json.dumps(h).lower() for h in post_hooks):
         post_hooks.append({
             "matcher": "*",
@@ -1097,9 +1218,20 @@ if __name__ == "__main__":
             }]
         })
 
+    # Stop — fires after EVERY response, records the full conversation turn
+    stop_hooks = hooks.setdefault("Stop", [])
+    if not any("atlast" in json.dumps(h).lower() for h in stop_hooks):
+        stop_hooks.append({
+            "matcher": "",
+            "hooks": [{
+                "type": "command",
+                "command": stop_hook_command
+            }]
+        })
+
     settings_file.parent.mkdir(parents=True, exist_ok=True)
     settings_file.write_text(json.dumps(settings, indent=2))
-    print("  Claude Code: ✅ recording hooks installed")
+    print("  Claude Code: ✅ recording hooks installed (PostToolUse + Stop)")
     # Check if Claude Code is currently running — if so, warn to restart
     try:
         from .flush import _is_process_running
