@@ -1063,10 +1063,20 @@ def _flush_buffer(buf, session_file):
             steps = buf.get("steps", [])
             tool_names = [s.get("tool_name", "?") for s in steps]
             summary = ", ".join(f"{n}" for n in set(tool_names))
+            # Derive agent name from transcript path in buffer
+            _agent = "claude-code"
+            _tp = buf.get("transcript_path", "")
+            if _tp:
+                _parts = Path(_tp).parent.name.split("-")
+                _meaningful = [p for p in _parts if p and p != "Users"]
+                for _i, _p in enumerate(_meaningful):
+                    if _p in ("Desktop","Documents","Projects","repos","code","src","home"):
+                        _agent = "-".join(_meaningful[_i+1:]) or _agent
+                        break
             record_minimal(
                 input_content=buf.get("user_input", f"Claude Code ({summary})"),
                 output_content=buf.get("agent_output", f"{len(steps)} tool calls"),
-                agent="claude-code",
+                agent=_agent,
                 action="session",
                 model="claude",
                 latency_ms=sum(s.get("duration_ms", 0) for s in steps),
@@ -1305,13 +1315,36 @@ def main():
         meta = json.dumps({"_aggregated": True, "steps": tool_count, "tool_names": tool_names})
         output = meta + "\\n" + output
 
+    # Derive agent name from project directory
+    # Path: ~/.claude/projects/-Users-capital-Desktop-nova-agent/session.jsonl
+    # Extract last segment of project dir: "nova-agent"
+    agent_name = "claude-code"
+    if transcript_path:
+        try:
+            project_dir = transcript_path.parent.name  # e.g. "-Users-capital-Desktop-nova-agent"
+            parts = project_dir.split("-")
+            # Take the last meaningful segment(s) — skip the path prefix
+            # Find the last part that looks like a project name
+            meaningful = [p for p in parts if p and p not in ("Users",)]
+            if len(meaningful) >= 2:
+                # Skip username, take the rest after Desktop/Documents/etc
+                for i, p in enumerate(meaningful):
+                    if p in ("Desktop", "Documents", "Projects", "repos", "code", "src", "home"):
+                        agent_name = "-".join(meaningful[i+1:])
+                        break
+                if agent_name == "claude-code" and meaningful:
+                    agent_name = meaningful[-1]
+        except:
+            pass
+    _log("Agent name: %s" % agent_name)
+
     # Record!
     try:
         from atlast_ecp.core import record_minimal
         record_minimal(
             input_content=last_user_msg,
             output_content=output,
-            agent="claude-code",
+            agent=agent_name,
             action="conversation",
             model=last_model or "claude",
             latency_ms=int(data.get("duration_ms", 0)),
