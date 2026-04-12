@@ -679,7 +679,7 @@ def cmd_init(args: list[str]):
 
 
 def _auto_setup_proxy(identity: dict):
-    """Auto-detect OpenClaw agent, start proxy daemon, configure LLM routing."""
+    """Auto-detect agent environment, start proxy daemon, configure LLM routing."""
     import json
     import socket
     import subprocess
@@ -689,6 +689,7 @@ def _auto_setup_proxy(identity: dict):
     # 1. Detect OpenClaw agent from environment
     profile = os.environ.get("OPENCLAW_PROFILE", "")
     state_dir = os.environ.get("OPENCLAW_STATE_DIR", "")
+    is_openclaw = False
     if not profile and not state_dir:
         # Try to detect from ~/.openclaw-* directories
         home = Path.home()
@@ -697,26 +698,31 @@ def _auto_setup_proxy(identity: dict):
         if len(candidates) == 1:
             state_dir = str(candidates[0])
             profile = candidates[0].name.replace(".openclaw-", "")
+            is_openclaw = True
         elif len(candidates) > 1:
-            # Can't auto-detect — multiple agents
-            print("  Recording: ⚠️  multiple OpenClaw agents found, skipping auto-setup")
-            print("     Run: atlast proxy --port 8340 --agent <name>")
-            return
-        else:
-            print("  Recording: 📡 use 'atlast proxy' to record real API calls")
-            return
+            # Multiple OpenClaw agents — pick first, still start proxy
+            state_dir = str(candidates[0])
+            profile = candidates[0].name.replace(".openclaw-", "")
+            is_openclaw = True
+            print(f"  Recording: 📡 multiple OpenClaw agents found, using '{profile}'")
+    else:
+        is_openclaw = True
 
-    agent_name = profile or "default"
+    agent_name = profile or identity.get("did", "default").split(":")[-1][:8] or "default"
     if state_dir:
         state_path = Path(state_dir)
     else:
-        state_path = Path.home() / f".openclaw-{profile}"
+        state_path = Path.home() / f".openclaw-{profile}" if profile else None
 
-    # 2. Find a free port for proxy
-    def _find_free_port():
+    # 2. Find a free port for proxy (use fixed 5765 if available, otherwise random)
+    def _find_free_port(preferred: int = 5765) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
+            try:
+                s.bind(("127.0.0.1", preferred))
+                return preferred
+            except OSError:
+                s.bind(("127.0.0.1", 0))
+                return s.getsockname()[1]
 
     proxy_port = _find_free_port()
 
@@ -757,27 +763,33 @@ run_proxy(port={proxy_port}, agent="{agent_name}")
         print(f"  Recording: ❌ could not start proxy: {e}")
         return
 
-    # 5. Configure OpenClaw models.json to route through proxy
-    models_json = state_path / "agents" / "main" / "agent" / "models.json"
-    try:
-        if models_json.exists():
-            with open(models_json) as f:
-                models = json.load(f)
-        else:
-            models_json.parent.mkdir(parents=True, exist_ok=True)
-            models = {"providers": {}}
-
-        models.setdefault("providers", {})
-        models["providers"]["anthropic"] = {
-            "baseUrl": f"http://127.0.0.1:{proxy_port}",
-            "api": "anthropic-messages"
-        }
-        with open(models_json, "w") as f:
-            json.dump(models, f, indent=2)
-        print("  Routing: ✅ LLM calls → proxy → recorded")
-    except Exception as e:
-        print(f"  Routing: ⚠️  could not configure auto-routing: {e}")
-        print(f"     Set ANTHROPIC_BASE_URL=http://127.0.0.1:{proxy_port}")
+    # 5. Configure routing
+    if is_openclaw and state_path:
+        # OpenClaw: auto-configure models.json
+        models_json = state_path / "agents" / "main" / "agent" / "models.json"
+        try:
+            if models_json.exists():
+                with open(models_json) as f:
+                    models = json.load(f)
+            else:
+                models_json.parent.mkdir(parents=True, exist_ok=True)
+                models = {"providers": {}}
+            models.setdefault("providers", {})
+            models["providers"]["anthropic"] = {
+                "baseUrl": f"http://127.0.0.1:{proxy_port}",
+                "api": "anthropic-messages"
+            }
+            with open(models_json, "w") as f:
+                json.dump(models, f, indent=2)
+            print("  Routing: ✅ LLM calls → proxy → recorded")
+        except Exception as e:
+            print(f"  Routing: ⚠️  could not configure auto-routing: {e}")
+            print(f"     Set ANTHROPIC_BASE_URL=http://127.0.0.1:{proxy_port}")
+    else:
+        # Generic agent: tell user to set env var
+        print(f"  Routing: ✅ proxy ready on port {proxy_port}")
+        print(f"     To record API calls, set: export OPENAI_BASE_URL=http://127.0.0.1:{proxy_port}")
+        print(f"     Or: export ANTHROPIC_BASE_URL=http://127.0.0.1:{proxy_port}")
 
     # 6. Create LaunchAgent for persistence (macOS)
     if sys.platform == "darwin":
@@ -911,7 +923,22 @@ if __name__ == "__main__":
         shutil.copy(hooks_src, hook_file)
 
     # Register PostToolUse hook in settings.json
+    # Prefer system python3 over venv python — hooks run outside venv context
     python_bin = sys.executable or "python3"
+    if hasattr(sys, "prefix") and sys.prefix != sys.base_prefix:
+        # We're inside a venv — use system python3 instead so hooks work globally
+        import shutil
+        system_python = shutil.which("python3") or shutil.which("python") or "python3"
+        # Verify atlast_ecp is importable from system python
+        try:
+            check = subprocess.run(
+                [system_python, "-c", "import atlast_ecp"],
+                capture_output=True, timeout=5,
+            )
+            if check.returncode == 0:
+                python_bin = system_python
+        except Exception:
+            pass  # Keep venv python as fallback
     hook_command = f"{python_bin} {hook_file}"
 
     hooks = settings.setdefault("hooks", {})
@@ -930,6 +957,13 @@ if __name__ == "__main__":
     settings_file.parent.mkdir(parents=True, exist_ok=True)
     settings_file.write_text(json.dumps(settings, indent=2))
     print("  Claude Code: ✅ recording hooks installed")
+    # Check if Claude Code is currently running — if so, warn to restart
+    try:
+        from .flush import _is_process_running
+        if _is_process_running("claude"):
+            print("  ⚠️  Claude Code is running — restart it for hooks to take effect")
+    except Exception:
+        pass
 
 
 def _ask_backup_location():
