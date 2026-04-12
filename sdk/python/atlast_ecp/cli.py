@@ -665,19 +665,50 @@ def cmd_init(args: list[str]):
             print("  Server: 📁 offline mode (records saved locally, sync later with: atlast register)")
 
         # Auto-setup: detect OpenClaw agent, start proxy, configure routing
-        _auto_setup_proxy(identity)
+        proxy_port = _auto_setup_proxy(identity)
 
         # Auto-setup: detect Claude Code, install hooks
-        _auto_setup_claude_code()
+        claude_hooks_installed = _auto_setup_claude_code()
 
-        print("\n  ✅ ATLAST ECP is ready!")
+        # ── Fixed post-install status card ──
+        # This output must be consistent regardless of which LLM runs it.
+        # It tells the user (or the LLM relaying to the user) exactly what happened
+        # and what to do next.
+        did_display = identity.get("did", "unknown")
         print("")
-        print("  ⚠️  IMPORTANT: You MUST restart your agent for recording to begin:")
-        print("     • Claude Code → quit and reopen (type /exit then run 'claude' again)")
-        print("     • Other agents → kill the process and re-run it")
-        print("     • New terminal → run: source ~/.zshrc")
-        print("")
-        print("  📊 Dashboard: python3 -m atlast_ecp.cli dashboard")
+        print("╔══════════════════════════════════════════════════════════════╗")
+        print("║              ATLAST ECP — Installation Complete             ║")
+        print("╠══════════════════════════════════════════════════════════════╣")
+        print("║                                                            ║")
+        print("║  Status:    ✅ Ready                                        ║")
+        print(f"║  Version:   {__import__('atlast_ecp').__version__ if hasattr(__import__('atlast_ecp'), '__version__') else '?':45s}║")
+        print(f"║  Agent ID:  {did_display[-16:]:45s}║")
+        print(f"║  Security:  {'Ed25519 (strong)' if identity.get('verified') else 'Basic':45s}║")
+        print(f"║  Proxy:     {'Port ' + str(proxy_port) + ' (running)' if proxy_port else 'Not started':45s}║")
+        print(f"║  Hooks:     {'Claude Code (PostToolUse + Stop)' if claude_hooks_installed else 'None':45s}║")
+        print(f"║  Storage:   ~/.ecp/records/{'':<33s}║")
+        print("║                                                            ║")
+        print("╠══════════════════════════════════════════════════════════════╣")
+        print("║                                                            ║")
+        print("║  ⚠️  NEXT STEPS (required):                                 ║")
+        print("║                                                            ║")
+        if claude_hooks_installed:
+            print("║  1. RESTART Claude Code:                                   ║")
+            print("║     Type /exit, then run 'claude' again                    ║")
+            print("║                                                            ║")
+        if proxy_port:
+            print("║  2. RESTART your AI agent (Hermes, etc.):                  ║")
+            print("║     Kill the process, open a NEW terminal, re-run it       ║")
+            print("║     (env vars are auto-configured in ~/.zshrc)             ║")
+            print("║                                                            ║")
+        print("║  📊 VIEW DASHBOARD:                                         ║")
+        print("║     python3 -m atlast_ecp.cli dashboard                     ║")
+        print("║     Then open http://localhost:3827 in your browser          ║")
+        print("║                                                            ║")
+        print("║  📋 CHECK STATUS:                                           ║")
+        print("║     python3 -m atlast_ecp.cli doctor                        ║")
+        print("║                                                            ║")
+        print("╚══════════════════════════════════════════════════════════════╝")
     else:
         print("  Identity: skipped (run 'atlast init' to create DID)")
         print("\n  Next: echo '{\"in\":\"prompt\",\"out\":\"response\"}' | atlast record")
@@ -714,8 +745,8 @@ def _write_env_to_shell_profile(key: str, value: str):
         pass  # Fail-open
 
 
-def _auto_setup_proxy(identity: dict):
-    """Auto-detect agent environment, start proxy daemon, configure LLM routing."""
+def _auto_setup_proxy(identity: dict) -> int:
+    """Auto-detect agent environment, start proxy daemon, configure LLM routing. Returns port or 0."""
     import json
     import socket
     import subprocess
@@ -733,9 +764,9 @@ def _auto_setup_proxy(identity: dict):
 
     if _is_port_in_use(5765):
         print("  Recording: ✅ proxy already running on port 5765")
-        print(f"     Your agent's API calls are being recorded.")
-        print(f"     Ensure: export OPENAI_BASE_URL=http://127.0.0.1:5765")
-        return
+        _write_env_to_shell_profile("OPENAI_BASE_URL", "http://127.0.0.1:5765")
+        _write_env_to_shell_profile("ANTHROPIC_BASE_URL", "http://127.0.0.1:5765")
+        return 5765
 
     # 1. Detect OpenClaw agent from environment
     profile = os.environ.get("OPENCLAW_PROFILE", "")
@@ -794,11 +825,11 @@ run_proxy(port={proxy_port}, agent="{agent_name}")
         time.sleep(1)
         if proc.poll() is not None:
             print(f"  Recording: ❌ proxy failed to start (exit code {proc.returncode})")
-            return
+            return 0
         print(f"  Recording: ✅ proxy started on port {proxy_port} (PID {proc.pid})")
     except Exception as e:
         print(f"  Recording: ❌ could not start proxy: {e}")
-        return
+        return 0
 
     # 5. Configure routing
     if is_openclaw and state_path:
@@ -873,15 +904,17 @@ run_proxy(port={proxy_port}, agent="{agent_name}")
         except Exception:
             print("  Persistence: ⚠️  proxy running but won't auto-start on reboot")
 
+    return proxy_port
 
-def _auto_setup_claude_code():
-    """Auto-detect Claude Code and install recording hooks."""
+
+def _auto_setup_claude_code() -> bool:
+    """Auto-detect Claude Code and install recording hooks. Returns True if hooks installed."""
     from pathlib import Path
     import json
 
     claude_dir = Path.home() / ".claude"
     if not claude_dir.exists():
-        return  # No Claude Code installed
+        return False  # No Claude Code installed
 
     settings_file = claude_dir / "settings.json"
 
@@ -898,7 +931,7 @@ def _auto_setup_claude_code():
     existing_hooks = json.dumps(hooks)
     if "atlast_ecp" in existing_hooks or "atlast-ecp" in existing_hooks:
         print("  Claude Code: ✅ hooks already installed")
-        return
+        return True
 
     # Find the ecp_hooks.py file
     hooks_src = None
@@ -1307,6 +1340,8 @@ if __name__ == "__main__":
             print("  ⚠️  Claude Code is running — restart it for hooks to take effect")
     except Exception:
         pass
+
+    return True
 
 
 def _ask_backup_location():
