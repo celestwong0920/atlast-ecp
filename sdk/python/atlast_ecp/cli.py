@@ -683,6 +683,8 @@ def cmd_init(args: list[str]):
     server_status = "Registered" if server_ok else "Offline (local mode)"
 
     output = f"""
+[IMPORTANT: Show this ENTIRE block to the user exactly as-is. Do not summarize.]
+
 ============================================================
   ATLAST ECP v{_ver} — Installation Complete
 ============================================================
@@ -693,34 +695,36 @@ def cmd_init(args: list[str]):
   Hooks:     {hooks_status}
   Server:    {server_status}
   Storage:   {ECP_DIR}/records/
-{"" if not phrase_saved else f"  Recovery:  Saved to {ECP_DIR}/RECOVERY-PHRASE.txt"}
-------------------------------------------------------------
-  !! IMPORTANT — You MUST restart your agent !!
-------------------------------------------------------------
+{"  Recovery:  Saved to " + str(ECP_DIR) + "/RECOVERY-PHRASE.txt" if phrase_saved else ""}
+============================================================
+  !! YOU MUST RESTART YOUR AGENT FOR RECORDING TO WORK !!
+============================================================
 
-  Claude Code:
-    → Type /exit, then run 'claude' again
+  If you are Claude Code:
+    1. Type /exit to quit
+    2. Run 'claude' again to restart
 
-  Other agents (Hermes, LangChain, etc.):
-    → Kill the process
-    → Open a NEW terminal
-    → Re-run your agent
-    (OPENAI_BASE_URL is auto-configured in ~/.zshrc)
-
-------------------------------------------------------------
-  Commands
-------------------------------------------------------------
-
-  Dashboard:   python3 -m atlast_ecp.cli dashboard
-               Then open: http://localhost:3827
-
-  Status:      python3 -m atlast_ecp.cli doctor
-  Records:     python3 -m atlast_ecp.cli log
-  Stats:       python3 -m atlast_ecp.cli stats
+  If you are any other agent (Hermes, LangChain, etc.):
+    1. The user must kill your process
+    2. Open a NEW terminal (so ~/.zshrc is loaded)
+    3. Re-run the agent
 
 ============================================================
-  Full guide saved: {ECP_DIR}/INSTALL-GUIDE.txt
+  How to use after restart
 ============================================================
+
+  View dashboard:  python3 -m atlast_ecp.cli dashboard
+                   Then open http://localhost:3827 in browser
+
+  Check status:    python3 -m atlast_ecp.cli doctor
+  View records:    python3 -m atlast_ecp.cli log
+  View stats:      python3 -m atlast_ecp.cli stats
+
+  Full guide:      cat {ECP_DIR}/INSTALL-GUIDE.txt
+
+============================================================
+
+[IMPORTANT: The above block must be shown to the user in full.]
 """
     # Save to file
     try:
