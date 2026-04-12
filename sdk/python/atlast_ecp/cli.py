@@ -680,6 +680,36 @@ def cmd_init(args: list[str]):
     print()
 
 
+def _write_env_to_shell_profile(key: str, value: str):
+    """Write an env var export to the user's shell profile (~/.zshrc or ~/.bashrc)."""
+    from pathlib import Path
+    # Determine shell profile
+    shell = os.environ.get("SHELL", "/bin/zsh")
+    if "zsh" in shell:
+        profile = Path.home() / ".zshrc"
+    elif "bash" in shell:
+        profile = Path.home() / ".bashrc"
+    else:
+        profile = Path.home() / ".profile"
+
+    marker = f"export {key}="
+    try:
+        existing = profile.read_text() if profile.exists() else ""
+        # Update existing or append
+        if marker in existing:
+            # Replace existing line
+            lines = existing.split("\n")
+            new_lines = [f'{marker}"{value}"' if l.strip().startswith(marker) else l for l in lines]
+            profile.write_text("\n".join(new_lines))
+        else:
+            with open(profile, "a") as f:
+                f.write(f'\n# ATLAST ECP proxy routing\n{marker}"{value}"\n')
+        # Also set in current process environment
+        os.environ[key] = value
+    except Exception:
+        pass  # Fail-open
+
+
 def _auto_setup_proxy(identity: dict):
     """Auto-detect agent environment, start proxy daemon, configure LLM routing."""
     import json
@@ -788,11 +818,14 @@ run_proxy(port={proxy_port}, agent="{agent_name}")
         except Exception as e:
             print(f"  Routing: ⚠️  could not configure auto-routing: {e}")
 
-    # Always print env var instructions — works for ALL agents
-    print(f"\n  📡 To record any agent's API calls, set this env var:")
-    print(f"     export OPENAI_BASE_URL=http://127.0.0.1:{proxy_port}")
-    print(f"     export ANTHROPIC_BASE_URL=http://127.0.0.1:{proxy_port}")
-    print(f"     Then restart your agent for it to take effect.")
+    # Auto-write OPENAI_BASE_URL to shell profile for persistence
+    proxy_url = f"http://127.0.0.1:{proxy_port}"
+    _write_env_to_shell_profile("OPENAI_BASE_URL", proxy_url)
+    _write_env_to_shell_profile("ANTHROPIC_BASE_URL", proxy_url)
+    print(f"\n  📡 API routing configured:")
+    print(f"     OPENAI_BASE_URL={proxy_url}")
+    print(f"     ANTHROPIC_BASE_URL={proxy_url}")
+    print(f"     (written to shell profile — restart your terminal or run: source ~/.zshrc)")
 
     # 6. Create LaunchAgent for persistence (macOS)
     if sys.platform == "darwin":
@@ -886,32 +919,139 @@ def _auto_setup_claude_code():
                 break
 
     if not hooks_src:
-        # Create a minimal inline hook script
+        # Create full hook script with transcript-based recording
         plugins_dir = claude_dir / "plugins"
         plugins_dir.mkdir(parents=True, exist_ok=True)
         hook_file = plugins_dir / "atlast_ecp_hook.py"
-        hook_file.write_text('''"""ATLAST ECP — Claude Code hook for passive recording."""
-import json, sys, time
+        hook_file.write_text('''"""ATLAST ECP — Claude Code hook with transcript-based conversation recording.
+
+On each PostToolUse:
+1. Buffer the tool call in ~/.ecp/hook_buffer/<session>.json
+2. Check transcript for new user messages
+3. When a new user message is detected, flush the PREVIOUS conversation as one aggregated record
+
+This means even pure-chat conversations get recorded (on the NEXT tool use trigger).
+"""
+import json, os, sys, time, hashlib
+from pathlib import Path
+
+ECP_DIR = Path(os.environ.get("ATLAST_ECP_DIR", str(Path.home() / ".ecp")))
+BUFFER_DIR = ECP_DIR / "hook_buffer"
+
+def _get_session_info():
+    """Extract session ID and transcript path from Claude Code environment."""
+    # Claude Code sets CLAUDE_SESSION_DIR or we can detect from process
+    session_dir = os.environ.get("CLAUDE_SESSION_DIR", "")
+    if session_dir:
+        session_id = hashlib.md5(session_dir.encode()).hexdigest()[:12]
+        transcript = Path(session_dir) / "transcript.jsonl"
+        return session_id, transcript if transcript.exists() else None
+
+    # Fallback: find most recent active session
+    claude_dir = Path.home() / ".claude" / "projects"
+    if claude_dir.exists():
+        # Use a stable session ID based on PID of parent claude process
+        ppid = os.environ.get("CLAUDE_PID", str(os.getppid()))
+        session_id = hashlib.md5(ppid.encode()).hexdigest()[:12]
+        return session_id, None
+
+    return "default", None
+
+def _count_user_messages(transcript_path):
+    """Count real user messages in transcript (not tool results)."""
+    if not transcript_path or not transcript_path.exists():
+        return 0
+    count = 0
+    try:
+        for line in transcript_path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                e = json.loads(line)
+                if e.get("type") == "user":
+                    c = e.get("message", {}).get("content", "")
+                    if isinstance(c, str) and len(c.strip()) > 0 and not c.startswith("<"):
+                        count += 1
+            except:
+                pass
+    except:
+        pass
+    return count
+
+def _flush_buffer(buf, session_file):
+    """Flush buffer into an ECP record using transcript data."""
+    try:
+        from atlast_ecp.flush import flush_stale_buffers
+        # Write buffer so flush system can pick it up
+        session_file.write_text(json.dumps(buf))
+        # Trigger flush
+        flush_stale_buffers(timeout_s=0)
+    except Exception:
+        # Fallback: direct record
+        try:
+            from atlast_ecp.core import record_minimal
+            steps = buf.get("steps", [])
+            tool_names = [s.get("tool_name", "?") for s in steps]
+            summary = ", ".join(f"{n}" for n in set(tool_names))
+            record_minimal(
+                input_content=buf.get("user_input", f"Claude Code ({summary})"),
+                output_content=buf.get("agent_output", f"{len(steps)} tool calls"),
+                agent="claude-code",
+                action="session",
+                model="claude",
+                latency_ms=sum(s.get("duration_ms", 0) for s in steps),
+            )
+            session_file.unlink(missing_ok=True)
+        except:
+            pass
 
 def main():
-    """Record a tool call via ATLAST ECP."""
     try:
-        from atlast_ecp.core import record_minimal
-        # Read hook data from stdin
         data = json.load(sys.stdin) if not sys.stdin.isatty() else {}
-        tool_name = data.get("tool_name", "unknown")
-        tool_input = json.dumps(data.get("tool_input", {}))[:500]
-        tool_output = data.get("tool_output", "")[:2000]
-        record_minimal(
-            input_content=f"{tool_name}: {tool_input}",
-            output_content=tool_output or "(completed)",
-            agent="claude-code",
-            action=tool_name,
-            model="claude",
-            latency_ms=int(data.get("duration_ms", 0)),
-        )
-    except Exception:
-        pass  # Fail-Open
+    except:
+        data = {}
+
+    tool_name = data.get("tool_name", "unknown")
+    session_id, transcript_path = _get_session_info()
+
+    BUFFER_DIR.mkdir(parents=True, exist_ok=True)
+    session_file = BUFFER_DIR / f"{session_id}.json"
+
+    # Load or create buffer
+    buf = {}
+    if session_file.exists():
+        try:
+            buf = json.loads(session_file.read_text())
+        except:
+            buf = {}
+
+    prev_msg_count = buf.get("user_message_count", 0)
+    current_msg_count = _count_user_messages(transcript_path)
+
+    # If new user message detected, flush previous conversation
+    if current_msg_count > prev_msg_count and buf.get("steps"):
+        _flush_buffer(buf, session_file)
+        buf = {}
+
+    # Add current tool call to buffer
+    steps = buf.get("steps", [])
+    steps.append({
+        "tool_name": tool_name,
+        "tool_input": data.get("tool_input", {}),
+        "tool_input_str": json.dumps(data.get("tool_input", {}))[:500],
+        "tool_response": str(data.get("tool_output", ""))[:2000],
+        "duration_ms": int(data.get("duration_ms", 0)),
+        "ts": time.time(),
+    })
+
+    buf["steps"] = steps
+    buf["last_update"] = time.time()
+    buf["session_id"] = session_id
+    buf["user_message_count"] = max(current_msg_count, prev_msg_count)
+    if transcript_path:
+        buf["transcript_path"] = str(transcript_path)
+
+    session_file.write_text(json.dumps(buf))
 
 if __name__ == "__main__":
     main()
