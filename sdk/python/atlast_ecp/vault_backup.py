@@ -173,7 +173,7 @@ def detect_backup_locations() -> list[dict]:
     home = Path.home()
     locations = []
 
-    # iCloud (macOS)
+    # iCloud
     if system == "Darwin":
         icloud = home / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
         locations.append({
@@ -181,6 +181,14 @@ def detect_backup_locations() -> list[dict]:
             "path": str(icloud / "ATLAST-Backup"),
             "available": icloud.exists(),
         })
+    elif system == "Windows":
+        icloud_win = home / "iCloudDrive"
+        if icloud_win.exists():
+            locations.append({
+                "name": "iCloud Drive",
+                "path": str(icloud_win / "ATLAST-Backup"),
+                "available": True,
+            })
 
     # Dropbox
     dropbox = home / "Dropbox"

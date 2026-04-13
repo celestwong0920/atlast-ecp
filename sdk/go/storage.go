@@ -10,7 +10,7 @@ import (
 // DefaultPath returns the default ECP records path.
 func DefaultPath() string {
 	home, _ := os.UserHomeDir()
-	return home + "/.atlast/records.jsonl"
+	return home + "/.ecp/records/records.jsonl"
 }
 
 // SaveRecord appends a record to a JSONL file.
