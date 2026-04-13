@@ -115,7 +115,7 @@ def flush_stale_buffers(timeout_s: int = 0) -> int:
                         for tl in tp.read_text().splitlines():
                             if tl.strip():
                                 try: entries.append(json.loads(tl))
-                                except: pass
+                                except (json.JSONDecodeError, ValueError): pass
 
                         # Collect real user messages (text, not tool_results, not system tags)
                         user_msgs = []

@@ -58,22 +58,12 @@ def _get_db() -> sqlite3.Connection:
         )
     """)
     # Migrate: add columns if missing (for existing DBs)
-    try:
-        db.execute("ALTER TABLE records ADD COLUMN is_infra INTEGER DEFAULT 0")
-    except Exception:
-        pass
-    try:
-        db.execute("ALTER TABLE records ADD COLUMN error_type TEXT DEFAULT ''")
-    except Exception:
-        pass
-    try:
-        db.execute("ALTER TABLE records ADD COLUMN tokens_in INTEGER DEFAULT 0")
-    except Exception:
-        pass
-    try:
-        db.execute("ALTER TABLE records ADD COLUMN tokens_out INTEGER DEFAULT 0")
-    except Exception:
-        pass
+    import sqlite3 as _sqlite3
+    for col, typ in [("is_infra","INTEGER DEFAULT 0"),("error_type","TEXT DEFAULT ''"),("tokens_in","INTEGER DEFAULT 0"),("tokens_out","INTEGER DEFAULT 0")]:
+        try:
+            db.execute(f"ALTER TABLE records ADD COLUMN {col} {typ}")
+        except _sqlite3.OperationalError:
+            pass  # Column already exists
     db.execute("CREATE INDEX IF NOT EXISTS idx_records_ts ON records(ts)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_records_agent ON records(agent)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_records_session ON records(session_id)")

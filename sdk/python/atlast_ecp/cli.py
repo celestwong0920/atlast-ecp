@@ -830,9 +830,11 @@ run_proxy(port={proxy_port}, agent="{agent_name}")
     try:
         import tempfile
         log_dir = Path(tempfile.gettempdir())
+        _stdout_f = open(log_dir / "atlast-proxy.log", "a")
+        _stderr_f = open(log_dir / "atlast-proxy-err.log", "a")
         popen_kwargs: dict = {
-            "stdout": open(log_dir / "atlast-proxy.log", "a"),
-            "stderr": open(log_dir / "atlast-proxy-err.log", "a"),
+            "stdout": _stdout_f,
+            "stderr": _stderr_f,
         }
         if sys.platform == "win32":
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -1042,9 +1044,9 @@ def _count_user_messages(transcript_path):
                     c = e.get("message", {}).get("content", "")
                     if isinstance(c, str) and len(c.strip()) > 0 and not c.startswith("<"):
                         count += 1
-            except:
+            except Exception:
                 pass
-    except:
+    except Exception:
         pass
     return count
 
@@ -1082,13 +1084,13 @@ def _flush_buffer(buf, session_file):
                 latency_ms=sum(s.get("duration_ms", 0) for s in steps),
             )
             session_file.unlink(missing_ok=True)
-        except:
+        except Exception:
             pass
 
 def main():
     try:
         data = json.load(sys.stdin) if not sys.stdin.isatty() else {}
-    except:
+    except Exception:
         data = {}
 
     tool_name = data.get("tool_name", "unknown")
@@ -1102,7 +1104,7 @@ def main():
     if session_file.exists():
         try:
             buf = json.loads(session_file.read_text())
-        except:
+        except Exception:
             buf = {}
 
     prev_msg_count = buf.get("user_message_count", 0)
@@ -1181,7 +1183,7 @@ def _log(msg):
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(LOG_FILE, "a") as f:
             f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\\n")
-    except:
+    except Exception:
         pass
 
 def _find_transcript():
@@ -1199,7 +1201,7 @@ def _find_transcript():
         try:
             if f.stat().st_size > 50:
                 candidates.append(f)
-        except:
+        except Exception:
             pass
 
     if not candidates:
@@ -1216,7 +1218,7 @@ def main():
     # Read hook data from stdin
     try:
         data = json.load(sys.stdin) if not sys.stdin.isatty() else {}
-    except:
+    except Exception:
         data = {}
 
     # Find transcript
@@ -1233,7 +1235,7 @@ def main():
             if line.strip():
                 try:
                     entries.append(json.loads(line))
-                except:
+                except Exception:
                     pass
     except Exception as e:
         _log(f"ERROR reading transcript: {e}")
@@ -1290,7 +1292,7 @@ def main():
             if dedup_file.read_text().strip() == dedup_key:
                 _log("Dedup: already recorded this turn")
                 return
-        except:
+        except Exception:
             pass
     dedup_file.write_text(dedup_key)
 
@@ -1312,7 +1314,7 @@ def main():
                     "result": str(s.get("tool_response", ""))[:500],
                 })
             bf.unlink(missing_ok=True)
-        except:
+        except Exception:
             pass
 
     output = last_assistant_msg or "(no response)"
@@ -1344,7 +1346,7 @@ def main():
                         break
                 if agent_name == "claude-code" and meaningful:
                     agent_name = meaningful[-1]
-        except:
+        except Exception:
             pass
     _log("Agent name: %s" % agent_name)
 
