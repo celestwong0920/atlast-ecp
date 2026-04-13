@@ -681,10 +681,27 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
             session_id = extracted.get("session_id") or "unknown"
             is_continuation = extracted.get("is_tool_continuation", False)
 
+            # Extract clean text from response JSON
+            clean_output = resp_content
+            try:
+                rj = json.loads(resp_content)
+                # OpenAI format
+                if "choices" in rj:
+                    msg = rj["choices"][0].get("message", {})
+                    clean_output = msg.get("content") or msg.get("reasoning") or resp_content
+                # Anthropic format
+                elif "content" in rj and isinstance(rj["content"], list):
+                    texts = [b.get("text","") for b in rj["content"] if isinstance(b,dict) and b.get("type")=="text"]
+                    if texts:
+                        clean_output = "\n".join(texts)
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+                pass
+            clean_output = clean_output.strip() if isinstance(clean_output, str) else clean_output
+
             # Build step data for this API call
             step_data = {
                 "input": extracted["input"],
-                "output": resp_content,
+                "output": clean_output,
                 "model": meta_model,
                 "latency_ms": latency_ms,
                 "tokens_in": tokens_in,
@@ -771,7 +788,7 @@ def _record_ecp(req_body: bytes, resp_content: str, path: str, provider: str,
                 from .core import record_minimal_v2
                 record_minimal_v2(
                     input_content=extracted["input"],
-                    output_content=resp_content,
+                    output_content=clean_output,
                     agent=agent,
                     action=_detect_action(path),
                     model=meta_model,
