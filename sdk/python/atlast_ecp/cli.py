@@ -1294,10 +1294,10 @@ def main():
             pass
     dedup_file.write_text(dedup_key)
 
-    # Merge pending tool buffers
+    # Merge pending tool buffers — extract FULL tool details
     buffer_dir = ecp_dir / "hook_buffer"
     tool_count = 0
-    tool_names = []
+    tool_calls_detail = []
     for bf in buffer_dir.glob("*.json"):
         if bf.name.startswith("_"):
             continue
@@ -1305,14 +1305,24 @@ def main():
             buf = json.loads(bf.read_text())
             steps = buf.get("steps", [])
             tool_count += len(steps)
-            tool_names.extend(s.get("tool_name", "?") for s in steps)
+            for s in steps:
+                tool_calls_detail.append({
+                    "name": s.get("tool_name", "?"),
+                    "input": s.get("tool_input_str", json.dumps(s.get("tool_input",{}))[:500]),
+                    "result": str(s.get("tool_response", ""))[:500],
+                })
             bf.unlink(missing_ok=True)
         except:
             pass
 
     output = last_assistant_msg or "(no response)"
     if tool_count > 0:
-        meta = json.dumps({"_aggregated": True, "steps": tool_count, "tool_names": tool_names})
+        meta = json.dumps({
+            "_aggregated": True,
+            "steps": tool_count,
+            "tool_names": [t["name"] for t in tool_calls_detail],
+            "tool_calls_used": [{"name": t["name"], "input": t["input"], "result": t["result"][:200]} for t in tool_calls_detail],
+        })
         output = meta + "\\n" + output
 
     # Derive agent name from project directory
@@ -1395,10 +1405,11 @@ def main():
                                 if texts: sa_prompt = " ".join(texts)[:1000]
                             break
 
-                    # Extract subagent final response
+                    # Extract ALL tool calls with full input + result
                     sa_response = None
                     sa_model = None
-                    sa_tools = []
+                    sa_tool_calls = []  # [{name, input, result}]
+                    pending_tools = {}  # tool_use_id → {name, input}
                     for e in sa_entries:
                         if e.get("type") == "assistant":
                             msg = e.get("message",{})
@@ -1408,16 +1419,45 @@ def main():
                                 for b in content:
                                     if isinstance(b, dict):
                                         if b.get("type") == "tool_use":
-                                            sa_tools.append(b.get("name","?"))
+                                            tid = b.get("id","")
+                                            inp = b.get("input",{})
+                                            # Extract meaningful input preview
+                                            inp_str = ""
+                                            if isinstance(inp, dict):
+                                                inp_str = inp.get("command") or inp.get("query") or inp.get("file_path") or inp.get("url") or json.dumps(inp)[:200]
+                                            pending_tools[tid] = {"name": b.get("name","?"), "input": str(inp_str)[:500]}
                                         elif b.get("type") == "text" and b.get("text","").strip():
                                             sa_response = b.get("text","")[:3000]
+                        elif e.get("type") == "user":
+                            content = e.get("message",{}).get("content",[])
+                            if isinstance(content, list):
+                                for b in content:
+                                    if isinstance(b, dict) and b.get("type") == "tool_result":
+                                        tid = b.get("tool_use_id","")
+                                        result_text = ""
+                                        rc = b.get("content","")
+                                        if isinstance(rc, str): result_text = rc[:500]
+                                        elif isinstance(rc, list):
+                                            for rb in rc:
+                                                if isinstance(rb, dict) and rb.get("type") == "text":
+                                                    result_text = rb.get("text","")[:500]; break
+                                        if tid in pending_tools:
+                                            sa_tool_calls.append({**pending_tools.pop(tid), "result": result_text})
+                    # Add any tools without results
+                    for tid, tool in pending_tools.items():
+                        sa_tool_calls.append({**tool, "result": ""})
 
                     if not sa_prompt:
                         continue
 
                     sa_output = sa_response or "(no response)"
-                    if sa_tools:
-                        meta = json.dumps({"_aggregated": True, "steps": len(sa_tools), "tool_names": sa_tools})
+                    if sa_tool_calls:
+                        meta = json.dumps({
+                            "_aggregated": True,
+                            "steps": len(sa_tool_calls),
+                            "tool_names": [t["name"] for t in sa_tool_calls],
+                            "tool_calls_used": [{"name": t["name"], "input": t["input"], "result": t["result"][:200]} for t in sa_tool_calls],
+                        })
                         sa_output = meta + "\\n" + sa_output
 
                     try:
