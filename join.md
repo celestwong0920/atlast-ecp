@@ -17,9 +17,7 @@ All data stays local. Only hashes are published.
 pip install atlast-ecp
 ```
 
-If you're in a system that restricts pip, try `pip install --user atlast-ecp` or `pip install --break-system-packages atlast-ecp`.
-
-Verify: `python3 -c "import atlast_ecp; print(atlast_ecp.__version__)"` — should print 0.11.1 or higher.
+Verify: `python3 -c "import atlast_ecp; print(atlast_ecp.__version__)"` — should print 0.25+ or higher.
 
 ## Step 2: Initialize
 

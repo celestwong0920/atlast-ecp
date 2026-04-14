@@ -2,20 +2,25 @@
 
 Thank you for your interest in contributing to the Evidence Chain Protocol!
 
+## Community
+
+- **Discord**: [discord.gg/gztk5Ud3C2](https://discord.gg/gztk5Ud3C2) — ask questions, report bugs, discuss features
+- **Email**: atlastecp@gmail.com — business inquiries
+- **GitHub Issues**: Bug reports and feature requests
+- **GitHub Discussions**: General questions and ideas
+
 ## Development Setup
 
 ### Monorepo Structure
 
 ```
 atlast-ecp/
-├── sdk/python/       # Python SDK (PyPI: atlast-ecp)
-├── sdk/typescript/   # TypeScript SDK (npm: @atlast/sdk)
-├── sdk/go/           # Go SDK (placeholder)
+├── sdk/python/       # Python SDK (PyPI: atlast-ecp) — primary
+├── sdk/go/           # Go SDK — minimal ECP records
 ├── server/           # ECP Reference Server (FastAPI)
 ├── whitepaper/       # Whitepaper + Litepaper (EN + ZH)
 ├── docs/             # ADRs, migration guides, specs
-├── ECP-SPEC.md       # Protocol specification
-└── INTERFACE-CONTRACT.md  # Atlas ↔ LLaChat contract
+└── ECP-SPEC.md       # Protocol specification
 ```
 
 ### Python SDK
@@ -23,16 +28,17 @@ atlast-ecp/
 ```bash
 git clone https://github.com/willau95/atlast-ecp.git
 cd atlast-ecp/sdk/python
-pip install -e ".[dev,proxy,adapters]"
-pytest -v
+pip install -e ".[dev,crypto]"
+pytest tests/ -v
 ```
 
-### TypeScript SDK
+Requires Python 3.9+.
+
+### Go SDK
 
 ```bash
-cd sdk/typescript
-npm install
-npm test
+cd sdk/go
+go test ./... -v
 ```
 
 ### Reference Server
@@ -49,51 +55,45 @@ python -m pytest tests/ -v
 2. **Write tests** for any new functionality
 3. **Run the full test suite** before submitting:
    ```bash
-   cd sdk/python && pytest -v              # Python SDK (506+ tests)
-   cd sdk/typescript && npm test           # TypeScript SDK (39+ tests)
-   cd server && python -m pytest tests/ -v # Reference Server (42+ tests)
+   cd sdk/python && pytest tests/ -v   # Python SDK (830+ tests)
+   cd sdk/go && go test ./... -v       # Go SDK
+   cd server && python -m pytest tests/ -v # Server
    ```
 4. **Update documentation** if you changed public APIs
-5. **Update CHANGELOG.md** for user-facing changes
+5. Submit a **Pull Request** with a clear description
 
 ## Code Conventions
 
-- **Python**: Type hints everywhere. `from __future__ import annotations`.
-- **TypeScript**: Strict mode. No `any` unless absolutely necessary.
+- **Python**: Type hints. `from __future__ import annotations` in new files.
+- **Go**: Standard library only. No external dependencies.
 - **Tests**: Descriptive names (`test_upload_batch_wrong_key`, not `test_3`).
-- **Fail-Open**: Recording/SDK failures must NEVER crash the host agent.
+- **Fail-Open**: Recording failures must NEVER crash the host agent.
 - **Privacy**: Never log or transmit raw content. Hashes only.
 
 ## ECP Spec Compliance
 
 All contributions must maintain compatibility with [ECP-SPEC.md](ECP-SPEC.md):
 
-- Accept both v0.1 (nested) and v1.0 (flat) record formats
-- `hash_content()` output must be identical across Python, TypeScript, and Go SDKs
+- Record format: ECP v1.0 flat format (7 core fields)
+- `hash_content()` output must be identical across Python and Go SDKs
 - Record IDs: `rec_` + 16 hex characters
-- Merkle root algorithm: sort → pair → SHA-256 (see `verify.py`)
+- Chain hash: SHA-256 of canonical JSON (sorted keys, no spaces)
 
 ## Cross-SDK Hash Consistency
 
-If you modify `hash_content()` or Merkle tree logic in any SDK, you **must** verify the output matches all other SDKs. This is a protocol invariant.
+If you modify `hash_content()` or Merkle tree logic, verify the output matches all SDKs:
 
 ```python
-# This must produce the same hash in Python, TypeScript, and Go:
 hash_content("hello") == "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 ```
 
-## Adapter Guidelines
+## 🔒 Important: Install Interface is Locked
 
-Framework adapters (LangChain, CrewAI, etc.) must:
-
-- Have **zero required dependencies** on the framework
-- Import the framework at runtime only
-- Degrade gracefully (no-op) if the framework is not installed
-- Include tests that work without the framework installed
+`pip3 install atlast-ecp` and `atlast init` are permanent public interfaces. They must never change. See ARCHITECTURE-DECISIONS.md for details.
 
 ## Reporting Security Issues
 
-See [SECURITY.md](SECURITY.md).
+Please email security issues to atlastecp@gmail.com. Do not open public issues for security vulnerabilities.
 
 ## License
 

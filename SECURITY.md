@@ -12,7 +12,7 @@ This policy covers:
 
 **Please do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, email: **security@atlast.dev** (or open a private security advisory on GitHub)
+Instead, email: **atlastecp@gmail.com** (or open a private security advisory on GitHub)
 
 Include:
 1. Description of the vulnerability

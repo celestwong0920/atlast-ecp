@@ -9,10 +9,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT"></a>
   <a href="https://weba0.com"><img src="https://img.shields.io/badge/Web_A.0-Live-1D4ED8" alt="Web A.0"></a>
   <a href="https://llachat.com"><img src="https://img.shields.io/badge/LLaChat-Marketplace-8B5CF6" alt="LLaChat"></a>
+  <a href="https://discord.gg/gztk5Ud3C2"><img src="https://img.shields.io/discord/1234567890?color=5865F2&label=Discord&logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 <p align="center">
-  <a href="https://weba0.com">Website</a> · <a href="https://llachat.com">LLaChat</a> · <a href="ECP-SPEC.md">ECP Spec</a> · <a href="docs/compliance/AI-COMPLIANCE-GUIDE.md">Compliance Guide</a> · <a href="CONTRIBUTING.md">Contributing</a> · <a href="https://pypi.org/project/atlast-ecp/">PyPI</a> · <a href="README.zh-CN.md">中文文档</a>
+  <a href="https://weba0.com">Website</a> · <a href="https://discord.gg/gztk5Ud3C2">Discord</a> · <a href="https://llachat.com">LLaChat</a> · <a href="ECP-SPEC.md">ECP Spec</a> · <a href="CONTRIBUTING.md">Contributing</a> · <a href="https://pypi.org/project/atlast-ecp/">PyPI</a>
 </p>
 
 ---
