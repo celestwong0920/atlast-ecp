@@ -78,7 +78,7 @@ def discover_clusters(
         label = _generate_label(group["error_type"], group["model"], group["flags"])
 
         clusters.append({
-            "cluster_id": "clust_%s" % abs(hash(key)) % 10**8,
+            "cluster_id": "clust_%s" % (abs(hash(key)) % 10**8),
             "label": label,
             "pattern": {
                 "error_type": group["error_type"],
