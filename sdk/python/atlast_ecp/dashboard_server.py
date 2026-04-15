@@ -115,6 +115,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "active": get_active_incident(),
             }
 
+        # ── Suggestions ──
+        elif path == "/api/suggestions":
+            agent = params.get("agent", [None])[0]
+            audit_data = audit(days=30, agent=agent, as_json=True)
+            return {"suggestions": audit_data.get("suggestions", [])}
+
         # ── Threads: conversation grouping ──
         elif path == "/api/threads":
             agent = params.get("agent", [None])[0]

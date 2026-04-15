@@ -899,6 +899,18 @@ def audit(
         "health": "healthy" if not anomalies else ("degraded" if any(a["severity"] == "high" for a in anomalies) else "warning"),
     }
 
+    # Generate auto-fix suggestions
+    try:
+        from .suggestions import generate_suggestions
+        from .incidents import get_incidents
+        report["suggestions"] = generate_suggestions(
+            records=records,
+            anomalies=anomalies,
+            incidents=get_incidents(limit=5),
+        )
+    except Exception:
+        report["suggestions"] = []
+
     db.close()
 
     if not as_json:
