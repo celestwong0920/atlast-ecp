@@ -1104,6 +1104,7 @@ def _flush_buffer(buf, session_file):
                     if _p in ("Desktop","Documents","Projects","repos","code","src","home"):
                         _agent = "-".join(_meaningful[_i+1:]) or _agent
                         break
+            _sess = buf.get("session_id", "")
             record_minimal(
                 input_content=buf.get("user_input", f"Claude Code ({summary})"),
                 output_content=buf.get("agent_output", f"{len(steps)} tool calls"),
@@ -1111,6 +1112,8 @@ def _flush_buffer(buf, session_file):
                 action="session",
                 model="claude",
                 latency_ms=sum(s.get("duration_ms", 0) for s in steps),
+                session_id=_sess,
+                thread_id=_sess,
             )
             session_file.unlink(missing_ok=True)
         except Exception:
@@ -1379,6 +1382,20 @@ def main():
             pass
     _log("Agent name: %s" % agent_name)
 
+    # Extract session_id from transcript path (UUID)
+    session_id = ""
+    if transcript_path:
+        session_id = transcript_path.stem  # e.g. "a1b2c3d4-..."
+
+    # Extract token counts from transcript entries
+    total_tokens_in = 0
+    total_tokens_out = 0
+    for e in entries:
+        usage = e.get("message", {}).get("usage", {})
+        if usage:
+            total_tokens_in += usage.get("input_tokens", 0)
+            total_tokens_out += usage.get("output_tokens", 0)
+
     # Record main conversation
     try:
         from atlast_ecp.core import record_minimal
@@ -1389,8 +1406,12 @@ def main():
             action="conversation",
             model=last_model or "claude",
             latency_ms=int(data.get("duration_ms", 0)),
+            session_id=session_id,
+            thread_id=session_id,
+            tokens_in=total_tokens_in or None,
+            tokens_out=total_tokens_out or None,
         )
-        _log("SUCCESS: recorded main conversation")
+        _log("SUCCESS: recorded main conversation (session=%s tokens=%d/%d)" % (session_id[:12], total_tokens_in, total_tokens_out))
     except Exception as e:
         _log("ERROR recording main: %s" % e)
 
@@ -1499,6 +1520,8 @@ def main():
                             action="subagent",
                             model=sa_model or last_model or "claude",
                             latency_ms=0,
+                            session_id=session_id,
+                            thread_id=session_id,
                         )
                         sa_recorded[sa_key] = sa_size
                         _log("SUCCESS: recorded subagent %s (%d tools)" % (sa_key, len(sa_tools)))
