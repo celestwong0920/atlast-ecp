@@ -105,8 +105,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _dispatch_api(self, path: str, params: dict) -> dict:
         from .query import search, trace, audit, timeline, rebuild_index, list_agents, list_threads, get_thread
 
+        # ── Attestations (proxy to ATLAST server) ──
+        if path == "/api/attestations":
+            try:
+                import urllib.request as _ur2
+                resp = _ur2.urlopen("https://api.weba0.com/v1/attestations?limit=100", timeout=10)
+                import json as _j2
+                return _j2.loads(resp.read())
+            except Exception as e:
+                return {"attestations": [], "error": str(e)}
+
         # ── Incidents ──
-        if path == "/api/incidents":
+        elif path == "/api/incidents":
             from .incidents import get_incidents, get_active_incident
             status = params.get("status", [None])[0]
             limit = int(params.get("limit", ["20"])[0])
