@@ -23,7 +23,7 @@ EAS_CONTRACT = "0x4200000000000000000000000000000000000021"
 # Chain config: Base Sepolia (testnet, free) or Base mainnet
 _USE_TESTNET = getattr(settings, 'EAS_CHAIN', 'sepolia') == 'sepolia'
 BASE_CHAIN_ID = 84532 if _USE_TESTNET else 8453
-BASE_RPC = "https://sepolia.base.org" if _USE_TESTNET else "https://mainnet.base.org"
+BASE_RPC = "https://sepolia.base.org" if _USE_TESTNET else "https://base.llamarpc.com"
 EAS_SCAN_BASE = "https://base-sepolia.easscan.org" if _USE_TESTNET else "https://base.easscan.org"
 
 
@@ -161,15 +161,15 @@ async def _live_attestation(
             "data": calldata,
             "nonce": nonce,
             "gas": gas_limit,
-            "maxFeePerGas": base_fee * 2,
-            "maxPriorityFeePerGas": w3.to_wei(0.001, 'gwei'),
+            "maxFeePerGas": base_fee * 3,
+            "maxPriorityFeePerGas": w3.to_wei(0.1, 'gwei'),
             "chainId": BASE_CHAIN_ID,
             "value": 0,
             "type": 2,
         }
         signed = account.sign_transaction(tx)
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=30)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
         return tx_hash, receipt, nonce
 
     tx_hash, receipt, used_nonce = await loop.run_in_executor(None, _send_tx)
