@@ -60,4 +60,4 @@ class TestCertifyMCP:
 
     def test_mcp_has_tools(self):
         from atlast_ecp.mcp_server import _get_tools
-        assert len(_get_tools()) == 12  # verify, profile, did, certify, recent, record, flush, stats
+        assert len(_get_tools()) == 16  # 12 original + incidents, suggestions, evaluate, threads

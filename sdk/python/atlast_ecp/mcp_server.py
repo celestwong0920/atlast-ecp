@@ -227,6 +227,32 @@ def _get_tools() -> list[dict]:
                 "required": []
             }
         },
+        {
+            "name": "ecp_incidents",
+            "description": "Get active and recent incidents (error spikes, latency anomalies).",
+            "inputSchema": {"type": "object", "properties": {}, "required": []}
+        },
+        {
+            "name": "ecp_suggestions",
+            "description": "Get auto-fix suggestions based on current agent health.",
+            "inputSchema": {"type": "object", "properties": {}, "required": []}
+        },
+        {
+            "name": "ecp_evaluate",
+            "description": "Get quality evaluation metrics: task adherence, frustration detection, response quality.",
+            "inputSchema": {"type": "object", "properties": {}, "required": []}
+        },
+        {
+            "name": "ecp_threads",
+            "description": "List recent conversation threads grouped by session.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max threads to return (default 10)"},
+                },
+                "required": []
+            }
+        },
     ]
 
 
@@ -527,6 +553,26 @@ def _handle_tool_call(tool_name: str, tool_input: dict) -> Any:
         return _tool_ecp_audit(**tool_input)
     elif tool_name == "ecp_timeline":
         return _tool_ecp_timeline(**tool_input)
+    elif tool_name == "ecp_incidents":
+        from .incidents import get_incidents, get_active_incident
+        return {"incidents": get_incidents(limit=10), "active": get_active_incident()}
+    elif tool_name == "ecp_suggestions":
+        from .query import audit
+        report = audit(days=30, as_json=True)
+        return {"suggestions": report.get("suggestions", [])}
+    elif tool_name == "ecp_evaluate":
+        from .query import _ensure_index, _get_db
+        from .evaluation import evaluate_records
+        _ensure_index()
+        db = _get_db()
+        rows = db.execute("SELECT id,agent,ts,model,flags,input_preview,output_preview,error,is_infra FROM records ORDER BY ts DESC LIMIT 200").fetchall()
+        db.close()
+        recs = [{"id":r[0],"agent":r[1],"ts":r[2],"model":r[3],"flags":r[4],"input_preview":r[5],"output_preview":r[6],"error":r[7],"is_infra":r[8]} for r in rows]
+        return evaluate_records(recs)
+    elif tool_name == "ecp_threads":
+        from .query import list_threads
+        limit = tool_input.get("limit", 10)
+        return {"threads": list_threads(limit=limit, as_json=True)}
     else:
         return {"error": f"Unknown tool: {tool_name}"}
 
