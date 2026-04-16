@@ -26,8 +26,7 @@ router = APIRouter()
 # Discord webhook for new user notifications
 _DISCORD_NEW_USERS_WEBHOOK = os.getenv(
     "ATLAST_DISCORD_NEW_USERS_WEBHOOK",
-    # Default: #bug-reports channel (replace after creating #new-users channel + webhook)
-    "https://discordapp.com/api/webhooks/1493511460314153001/GuZhuB2gUZQsqXKKVBtbHYVuU4XLex1HzPw6g1fi0Ix6DpunLAni9KdzEhpeoIqSdyje"
+    "https://discord.com/api/webhooks/1494157803110142063/i4d-J8nIXKBY7rS92Kt-Y-0CJSK_VAhYy1k9MW6JY2ZTmoXhV08hJk7AZFuUBQ6OCgFy"
 )
 
 
