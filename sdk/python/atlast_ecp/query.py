@@ -321,7 +321,7 @@ def list_agents(as_json: bool = False) -> list[dict]:
         # Detect agent framework from name and record patterns
         name_lower = (agent_name or "").lower()
         did_lower = (did or "").lower()
-        if "claude-code" in name_lower or "claude-code" in did_lower:
+        if "claude-code" in name_lower or "claude-code" in did_lower or "/subagent" in name_lower:
             framework = "claude-code"
         elif "hermes" in name_lower or "hermes" in did_lower:
             framework = "hermes"
@@ -340,7 +340,7 @@ def list_agents(as_json: bool = False) -> list[dict]:
                 _db2.close()
                 if action_row:
                     action = action_row[0]
-                    if action == "session":
+                    if action in ("session", "conversation", "subagent"):
                         framework = "claude-code"
                     elif action == "llm_call":
                         framework = "proxy"
