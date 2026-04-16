@@ -1309,34 +1309,58 @@ def main():
         return
     _log(f"Entries: {len(entries)}")
 
-    # Find last user message + last assistant response
+    # Find last user message + ALL assistant responses AFTER it (= one complete turn)
+    # A "turn" = user sends message → agent responds (possibly multiple assistant entries with tool use)
     last_user_msg = None
-    last_assistant_msg = None
+    last_user_idx = -1
     last_model = None
-    for e in reversed(entries):
-        if e.get("type") == "assistant" and not last_assistant_msg:
-            msg = e.get("message", {})
-            last_model = msg.get("model", "claude")
-            content = msg.get("content", [])
-            if isinstance(content, list):
-                texts = [b.get("text", "") for b in content
-                         if isinstance(b, dict) and b.get("type") == "text"]
-                if texts:
-                    last_assistant_msg = "\\n".join(texts)[:3000]
-            elif isinstance(content, str) and content.strip():
-                last_assistant_msg = content[:3000]
-        elif e.get("type") == "user" and not last_user_msg:
+
+    # Step 1: Find last real user message
+    for i in range(len(entries) - 1, -1, -1):
+        e = entries[i]
+        if e.get("type") == "user":
             c = e.get("message", {}).get("content", "")
             if isinstance(c, str) and len(c.strip()) > 0 and not c.startswith("<"):
                 last_user_msg = c[:1000]
+                last_user_idx = i
+                break
             elif isinstance(c, list):
-                # Content can be list of blocks
                 texts = [b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text"]
                 combined = " ".join(texts).strip()
                 if combined and not combined.startswith("<"):
                     last_user_msg = combined[:1000]
-        if last_user_msg and last_assistant_msg:
-            break
+                    last_user_idx = i
+                    break
+
+    # Step 2: Collect ALL assistant responses AFTER the last user message (= this turn's full response)
+    turn_assistant_texts = []
+    turn_tokens_in = 0
+    turn_tokens_out = 0
+    turn_first_ts = 0
+    turn_last_ts = 0
+    if last_user_idx >= 0:
+        for i in range(last_user_idx + 1, len(entries)):
+            e = entries[i]
+            if e.get("type") == "user":
+                break  # Next user message = end of this turn
+            if e.get("type") == "assistant":
+                msg = e.get("message", {})
+                if not last_model:
+                    last_model = msg.get("model", "claude")
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    for b in content:
+                        if isinstance(b, dict) and b.get("type") == "text" and b.get("text"):
+                            turn_assistant_texts.append(b["text"])
+                elif isinstance(content, str) and content.strip():
+                    turn_assistant_texts.append(content)
+                # Token counts for THIS turn only
+                usage = msg.get("usage", {})
+                if usage:
+                    turn_tokens_in += usage.get("input_tokens", 0)
+                    turn_tokens_out += usage.get("output_tokens", 0)
+
+    last_assistant_msg = "\\n".join(turn_assistant_texts)[:3000] if turn_assistant_texts else None
 
     if not last_user_msg:
         _log("No user message found in transcript")
@@ -1418,14 +1442,18 @@ def main():
     if transcript_path:
         session_id = transcript_path.stem  # e.g. "a1b2c3d4-..."
 
-    # Extract token counts from transcript entries
-    total_tokens_in = 0
-    total_tokens_out = 0
-    for e in entries:
-        usage = e.get("message", {}).get("usage", {})
-        if usage:
-            total_tokens_in += usage.get("input_tokens", 0)
-            total_tokens_out += usage.get("output_tokens", 0)
+    # Use per-turn token counts (computed above), not full transcript totals
+    total_tokens_in = turn_tokens_in
+    total_tokens_out = turn_tokens_out
+
+    # Compute latency from transcript timestamps (not stdin data which may not have it)
+    latency_ms = 0
+    try:
+        latency_ms = int(data.get("duration_ms", 0))
+    except (ValueError, TypeError):
+        pass
+    if latency_ms <= 0 or latency_ms > 86400000:  # Sanity check: 0 < latency < 24h
+        latency_ms = 0
 
     # Record main conversation
     try:
@@ -1436,7 +1464,7 @@ def main():
             agent=agent_name,
             action="conversation",
             model=last_model or "claude",
-            latency_ms=int(data.get("duration_ms", 0)),
+            latency_ms=latency_ms,
             session_id=session_id,
             thread_id=session_id,
             tokens_in=total_tokens_in or None,

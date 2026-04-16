@@ -499,6 +499,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif path == "/api/records":
             """Paginated records list with filtering."""
             agent = params.get("agent", [None])[0]
+            if agent:
+                agent = self._resolve_agent_name(agent)
             limit = int(params.get("limit", ["50"])[0])
             offset = int(params.get("offset", ["0"])[0])
             since = params.get("since", [None])[0]
