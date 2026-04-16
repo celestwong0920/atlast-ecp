@@ -105,8 +105,48 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _dispatch_api(self, path: str, params: dict) -> dict:
         from .query import search, trace, audit, timeline, rebuild_index, list_agents, list_threads, get_thread
 
+        # ── Session Records (main + subagents grouped) ──
+        if path == "/api/session-records":
+            session_id = params.get("session", [""])[0]
+            if not session_id:
+                return {"error": "session parameter required"}
+            from .query import _ensure_index as _sri, _get_db as _srdb
+            _sri()
+            db_sr = _srdb()
+            rows = db_sr.execute(
+                "SELECT id, agent, ts, step_type, action, model, latency_ms, "
+                "tokens_in, tokens_out, input_preview, output_preview, error, is_infra, flags "
+                "FROM records WHERE session_id = ? OR thread_id = ? ORDER BY ts ASC",
+                (session_id, session_id)
+            ).fetchall()
+            db_sr.close()
+            main_records = []
+            sub_records = []
+            for r in rows:
+                rec = {
+                    "id": r[0], "agent": r[1], "ts": r[2], "step_type": r[3],
+                    "action": r[4], "model": r[5], "latency_ms": r[6],
+                    "tokens_in": r[7], "tokens_out": r[8],
+                    "input_preview": r[9], "output_preview": r[10],
+                    "error": r[11], "is_infra": r[12], "flags": r[13],
+                    "is_subagent": "/subagent" in (r[1] or ""),
+                }
+                if rec["is_subagent"]:
+                    sub_records.append(rec)
+                else:
+                    main_records.append(rec)
+            return {
+                "session_id": session_id,
+                "main_records": main_records,
+                "sub_records": sub_records,
+                "total_main": len(main_records),
+                "total_sub": len(sub_records),
+                "total_tokens_in": sum(r.get("tokens_in") or 0 for r in main_records + sub_records),
+                "total_tokens_out": sum(r.get("tokens_out") or 0 for r in main_records + sub_records),
+            }
+
         # ── Token Analytics ──
-        if path == "/api/token-stats":
+        elif path == "/api/token-stats":
             from .query import _ensure_index as _tei, _get_db as _tdb
             _tei()
             db_t = _tdb()
@@ -278,13 +318,31 @@ class DashboardHandler(BaseHTTPRequestHandler):
         # ── Agents: list all agents with stats ──
         elif path == "/api/agents":
             agents = list_agents(as_json=True)
-            # Inject friendly names: keep DID in agent_did, show name in agent
+            # Inject friendly names
             for a in agents:
                 did = a.get("agent", "")
                 name = a.get("agent_name", "")
                 if name and name != did:
                     a["agent_did"] = did
                     a["agent"] = name
+                a["is_subagent"] = "/subagent" in (a.get("agent_name") or "") or "/sub" in (a.get("agent_name") or "")
+
+            # Merge subagent counts into main agents and filter
+            sub_counts = {}
+            for a in agents:
+                if a.get("is_subagent"):
+                    # "foo/subagent" → main = "foo"
+                    main_name = (a.get("agent_name") or "").split("/")[0]
+                    sub_counts[main_name] = sub_counts.get(main_name, 0) + a.get("total_records", 0)
+            for a in agents:
+                name = a.get("agent_name") or ""
+                if name in sub_counts:
+                    a["subagent_records"] = sub_counts[name]
+
+            # Filter: hide subagents from main list (they're shown under main agent)
+            show_sub = params.get("show_subagents", [""])[0] == "1"
+            if not show_sub:
+                agents = [a for a in agents if not a.get("is_subagent")]
             # Compute per-agent Trust Score
             try:
                 from .scoring_rules import classify_records, compute_trust_score_1000
