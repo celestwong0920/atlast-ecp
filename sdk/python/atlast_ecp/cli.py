@@ -1332,35 +1332,66 @@ def main():
                     last_user_idx = i
                     break
 
-    # Step 2: Collect ALL assistant responses AFTER the last user message (= this turn's full response)
-    turn_assistant_texts = []
+    # Step 2: Extract COMPLETE turn from transcript
+    # A turn = everything between user message and next user message (or end)
+    # Captures: text responses, tool calls (name+input), tool results, tokens
+    turn_text_blocks = []
+    turn_tool_calls = []
     turn_tokens_in = 0
     turn_tokens_out = 0
-    turn_first_ts = 0
-    turn_last_ts = 0
+    pending_tool = {}  # tool_use_id → {name, input}
+
     if last_user_idx >= 0:
         for i in range(last_user_idx + 1, len(entries)):
             e = entries[i]
-            if e.get("type") == "user":
-                break  # Next user message = end of this turn
-            if e.get("type") == "assistant":
+            etype = e.get("type", "")
+
+            # Stop at next user message (= next turn)
+            if etype == "user":
+                c = e.get("message", {}).get("content", "")
+                if isinstance(c, str) and len(c.strip()) > 0:
+                    break
+                elif isinstance(c, list) and any(b.get("text","").strip() for b in c if isinstance(b,dict)):
+                    break
+
+            if etype == "assistant":
                 msg = e.get("message", {})
                 if not last_model:
                     last_model = msg.get("model", "claude")
+
                 content = msg.get("content", [])
                 if isinstance(content, list):
-                    for b in content:
-                        if isinstance(b, dict) and b.get("type") == "text" and b.get("text"):
-                            turn_assistant_texts.append(b["text"])
+                    for block in content:
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get("type") == "text" and block.get("text"):
+                            turn_text_blocks.append(block["text"])
+                        elif block.get("type") == "tool_use":
+                            tid = block.get("id", "")
+                            tc = {"name": block.get("name", "?"), "input": json.dumps(block.get("input", {}))[:500]}
+                            pending_tool[tid] = tc
+                            turn_tool_calls.append(tc)
                 elif isinstance(content, str) and content.strip():
-                    turn_assistant_texts.append(content)
-                # Token counts for THIS turn only
+                    turn_text_blocks.append(content)
+
+                # Tokens for THIS turn only
                 usage = msg.get("usage", {})
                 if usage:
                     turn_tokens_in += usage.get("input_tokens", 0)
                     turn_tokens_out += usage.get("output_tokens", 0)
 
-    last_assistant_msg = "\\n".join(turn_assistant_texts)[:3000] if turn_assistant_texts else None
+            # Tool results — attach to pending tool call
+            elif etype == "tool_result":
+                tid = e.get("tool_use_id", "")
+                result_content = e.get("content", "")
+                if isinstance(result_content, list):
+                    result_content = " ".join(b.get("text","") for b in result_content if isinstance(b,dict))
+                if tid in pending_tool:
+                    pending_tool[tid]["result"] = str(result_content)[:500]
+
+    # Build the complete output
+    # Format: agent's text response (what user sees)
+    last_assistant_msg = "\n\n".join(turn_text_blocks) if turn_text_blocks else None
 
     if not last_user_msg:
         _log("No user message found in transcript")
@@ -1383,36 +1414,23 @@ def main():
             pass
     dedup_file.write_text(dedup_key)
 
-    # Merge pending tool buffers — extract FULL tool details
+    # Clean up any stale PostToolUse buffer files
     buffer_dir = ecp_dir / "hook_buffer"
-    tool_count = 0
-    tool_calls_detail = []
     for bf in buffer_dir.glob("*.json"):
-        if bf.name.startswith("_"):
-            continue
-        try:
-            buf = json.loads(bf.read_text())
-            steps = buf.get("steps", [])
-            tool_count += len(steps)
-            for s in steps:
-                tool_calls_detail.append({
-                    "name": s.get("tool_name", "?"),
-                    "input": s.get("tool_input_str", json.dumps(s.get("tool_input",{}))[:500]),
-                    "result": str(s.get("tool_response", ""))[:500],
-                })
-            bf.unlink(missing_ok=True)
-        except Exception:
-            pass
+        if not bf.name.startswith("_"):
+            try: bf.unlink(missing_ok=True)
+            except: pass
 
+    # Build output: tool call metadata on first line (JSON), then agent's actual response
     output = last_assistant_msg or "(no response)"
-    if tool_count > 0:
+    if turn_tool_calls:
         meta = json.dumps({
             "_aggregated": True,
-            "steps": tool_count,
-            "tool_names": [t["name"] for t in tool_calls_detail],
-            "tool_calls_used": [{"name": t["name"], "input": t["input"], "result": t["result"][:200]} for t in tool_calls_detail],
+            "steps": len(turn_tool_calls),
+            "tool_names": [t["name"] for t in turn_tool_calls],
+            "tool_calls_used": [{"name": t["name"], "input": t.get("input","")[:200], "result": t.get("result","")[:200]} for t in turn_tool_calls],
         })
-        output = meta + "\\n" + output
+        output = meta + "\n" + output
 
     # Derive agent name from project directory
     # Path: ~/.claude/projects/-Users-capital-Desktop-nova-agent/session.jsonl
