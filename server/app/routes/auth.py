@@ -9,6 +9,7 @@ Flow:
 """
 
 import hashlib
+import os
 import secrets
 from datetime import datetime, timezone
 
@@ -21,6 +22,41 @@ from ..db.models import Agent, APIKey
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+# Discord webhook for new user notifications
+_DISCORD_NEW_USERS_WEBHOOK = os.getenv(
+    "ATLAST_DISCORD_NEW_USERS_WEBHOOK",
+    # Default: #bug-reports channel (replace after creating #new-users channel + webhook)
+    "https://discordapp.com/api/webhooks/1493511460314153001/GuZhuB2gUZQsqXKKVBtbHYVuU4XLex1HzPw6g1fi0Ix6DpunLAni9KdzEhpeoIqSdyje"
+)
+
+
+async def _notify_new_user_discord(did: str, ecp_version: str = "?", ip: str = "?"):
+    """Send new agent registration to Discord. Fail-open."""
+    import urllib.request
+    import json
+    import time as _t
+    try:
+        payload = json.dumps({
+            "content": "\n".join([
+                "🎉 **NEW AGENT REGISTERED**",
+                "",
+                f"**DID:** `{did}`",
+                f"**Source:** Server API (register)",
+                f"**ECP Version:** v{ecp_version}",
+                f"**IP:** {ip}",
+                f"\n*{_t.strftime('%Y-%m-%d %H:%M UTC', _t.gmtime())}*",
+            ]),
+            "username": "ATLAST New Users",
+        })
+        req = urllib.request.Request(
+            _DISCORD_NEW_USERS_WEBHOOK,
+            data=payload.encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass
 
 
 def _generate_api_key() -> str:
@@ -160,6 +196,17 @@ async def register_agent(req: RegisterRequest, request: Request):
             )
             session.add(agent)
             logger.info("agent_registered_new", did=req.did)
+
+            # Notify Discord #new-users (fire-and-forget)
+            try:
+                import asyncio
+                asyncio.create_task(_notify_new_user_discord(
+                    did=req.did,
+                    ecp_version=req.ecp_version or "?",
+                    ip=request.client.host if request.client else "?",
+                ))
+            except Exception:
+                pass  # Fail-open
 
         # Generate new API key
         raw_key = _generate_api_key()

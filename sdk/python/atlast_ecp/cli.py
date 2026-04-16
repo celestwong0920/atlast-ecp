@@ -759,6 +759,14 @@ def cmd_init(args: list[str]):
         "errors": _init_errors if _init_errors else None,
     }, silent=True)
 
+    # New user notification (only for first-time install — mnemonic exists only for new identities)
+    if mnemonic:
+        _send_new_user_notification(
+            did=did,
+            source="atlast init (CLI)",
+            email=user_email,
+        )
+
     if user_email:
         print("  ✅ We'll reach out to help. You can also join Discord: https://discord.gg/gztk5Ud3C2\n")
     elif _init_errors:
@@ -2706,6 +2714,8 @@ def cmd_doctor(args: list[str]):
 
 
 _DISCORD_WEBHOOK = "https://discordapp.com/api/webhooks/1493511460314153001/GuZhuB2gUZQsqXKKVBtbHYVuU4XLex1HzPw6g1fi0Ix6DpunLAni9KdzEhpeoIqSdyje"
+# New users channel — set via env or replace with actual webhook URL after creating Discord channel
+_DISCORD_NEW_USERS_WEBHOOK = os.environ.get("ATLAST_DISCORD_NEW_USERS_WEBHOOK", _DISCORD_WEBHOOK)
 
 
 def _send_discord_alert(source: str, details: dict, silent: bool = False):
@@ -2760,6 +2770,47 @@ def _send_discord_alert(source: str, details: dict, silent: bool = False):
 def _send_discord_report(issues: list, fixed: list):
     """Legacy wrapper for doctor --report."""
     _send_discord_alert("Doctor Report", {"issues": issues, "fixed": fixed})
+
+
+def _send_new_user_notification(did: str, agent_name: str = "", source: str = "CLI", email: str = ""):
+    """Send new user notification to #new-users Discord channel. Fail-open."""
+    import urllib.request
+    import platform
+    try:
+        from . import __version__ as ver
+    except Exception:
+        ver = "?"
+
+    lines = [
+        "🎉 **NEW USER JOINED ATLAST**",
+        "",
+        f"**DID:** `{did}`",
+        f"**Source:** {source}",
+        f"**Version:** v{ver}",
+        f"**OS:** {platform.system()} {platform.machine()}",
+        f"**Python:** {sys.version.split()[0]}",
+    ]
+    if agent_name:
+        lines.append(f"**Agent:** {agent_name}")
+    if email:
+        lines.append(f"**Email:** {email}")
+    import time as _time2
+    lines.append(f"\n*{_time2.strftime('%Y-%m-%d %H:%M UTC', _time2.gmtime())}*")
+
+    payload = json.dumps({
+        "content": "\n".join(lines),
+        "username": "ATLAST New Users",
+        "avatar_url": "https://weba0.com/favicon.ico",
+    })
+    try:
+        req = urllib.request.Request(
+            _DISCORD_NEW_USERS_WEBHOOK,
+            data=payload.encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception:
+        pass  # Fail-open
 
 
 def cmd_dashboard(args: list[str]):
