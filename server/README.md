@@ -38,9 +38,9 @@ This server runs on [Railway](https://railway.app) from the `server/` directory 
 | `EAS_SCHEMA_UID` | EAS schema UID | `0xa67da7e...` |
 | `EAS_CHAIN` | `sepolia` or `base` | `sepolia` |
 | `LLACHAT_API_URL` | LLaChat API base URL | `https://api.llachat.com` |
-| `LLACHAT_INTERNAL_TOKEN` | Internal auth token (UUID) | `4b141c34-...` |
+| `LLACHAT_INTERNAL_TOKEN` | Internal auth token (UUID) | `your-internal-token...` |
 | `ECP_WEBHOOK_URL` | Webhook delivery URL | `https://api.llachat.com/v1/internal/ecp-webhook` |
-| `ECP_WEBHOOK_TOKEN` | HMAC signing secret | `b84ca16a...` |
+| `ECP_WEBHOOK_TOKEN` | HMAC signing secret | `your-webhook-secret...` |
 | `ENVIRONMENT` | `development` or `production` | `production` |
 
 ### Optional

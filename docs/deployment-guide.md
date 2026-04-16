@@ -20,7 +20,7 @@ The ECP Server is deployed on [Railway](https://railway.app) with auto-deploy fr
 | `EAS_CHAIN` | ✅ | `sepolia` or `base` | `sepolia` |
 | `EAS_STUB_MODE` | ❌ | `true` to skip real anchoring | `false` |
 | `ECP_WEBHOOK_URL` | ❌ | Webhook endpoint for attestation events | `https://api.llachat.com/v1/internal/ecp-webhook` |
-| `ECP_WEBHOOK_TOKEN` | ❌ | HMAC shared secret for webhook | `b84ca16a...` |
+| `ECP_WEBHOOK_TOKEN` | ❌ | HMAC shared secret for webhook | `your-webhook-secret...` |
 | `LLACHAT_API_URL` | ❌ | LLaChat API base URL | `https://api.llachat.com` |
 | `LLACHAT_INTERNAL_TOKEN` | ❌ | Internal API token | UUID |
 | `SENTRY_DSN` | ❌ | Sentry error tracking | `https://...@sentry.io/...` |
