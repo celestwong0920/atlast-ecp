@@ -102,10 +102,15 @@ DEFAULT_UPSTREAMS = {
     "gemini": "https://generativelanguage.googleapis.com",
     "minimax": "https://api.minimax.chat",
     "ollama": "http://127.0.0.1:11434",
+    # Local model servers (auto-detected)
+    "lmstudio": "http://127.0.0.1:1234",
+    "vllm": "http://127.0.0.1:8000",
+    "localai": "http://127.0.0.1:8080",
 }
 
 # Additional trusted API domains that can be used via X-Real-API-URL header
 TRUSTED_API_DOMAINS = {
+    # Cloud providers
     "openrouter.ai", "api.openrouter.ai",
     "api.together.xyz",
     "api.groq.com",
@@ -116,6 +121,14 @@ TRUSTED_API_DOMAINS = {
     "api.cohere.ai", "api.cohere.com",
     "generativelanguage.googleapis.com",
     "api.x.ai",
+    # Local model servers (localhost variants)
+    "localhost", "127.0.0.1",
+    "localhost:11434", "127.0.0.1:11434",   # Ollama
+    "localhost:1234", "127.0.0.1:1234",     # LM Studio
+    "localhost:8000", "127.0.0.1:8000",     # vLLM / HuggingFace transformers serve
+    "localhost:8080", "127.0.0.1:8080",     # LocalAI
+    "localhost:5000", "127.0.0.1:5000",     # Custom local servers
+    "localhost:3000", "127.0.0.1:3000",     # Custom local servers
 }
 
 # Env vars that might contain the original upstream URL
@@ -128,6 +141,8 @@ UPSTREAM_ENV_VARS = [
     "OPENAI_BASE_URL_ORIGINAL",  # Saved by atlast run
     "ANTHROPIC_BASE_URL_ORIGINAL",
     "OLLAMA_HOST",               # Ollama custom host
+    "VLLM_BASE_URL",             # vLLM custom host
+    "LMSTUDIO_BASE_URL",         # LM Studio custom host
 ]
 
 
@@ -157,7 +172,11 @@ def _resolve_upstream(request_headers: dict, provider: str) -> str:
             if val:
                 allowed_domains.add(urlparse(val).netloc)
         parsed = urlparse(explicit)
-        if parsed.netloc not in allowed_domains:
+        hostname = parsed.hostname or ""
+        is_local = hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+        if is_local or parsed.netloc in allowed_domains:
+            return explicit.rstrip("/")
+        else:
             try:
                 import structlog
                 structlog.get_logger().warning("proxy_blocked_upstream", url=explicit, allowed=list(allowed_domains))
@@ -165,8 +184,6 @@ def _resolve_upstream(request_headers: dict, provider: str) -> str:
                 import logging
                 logging.getLogger(__name__).warning("proxy_blocked_upstream url=%s allowed=%s", explicit, list(allowed_domains))
             # Fall through to env/default instead of using untrusted URL
-        else:
-            return explicit.rstrip("/")
 
     # 2. Env vars
     for var in UPSTREAM_ENV_VARS:
