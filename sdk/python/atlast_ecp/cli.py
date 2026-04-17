@@ -1210,9 +1210,30 @@ if __name__ == "__main__":
             pass  # Keep venv python as fallback
     hook_command = f"{python_bin} {hook_file}"
 
-    # Also create a Stop hook script that records conversation on every response
+    # Also create a Stop hook script that records conversation on every response.
+    # The full hook body lives at atlast_ecp/_claude_stop_hook_template.py so
+    # we can maintain it as normal Python (not escaped inside a triple-quoted string).
     stop_hook_file = plugins_dir / "atlast_ecp_stop_hook.py"
-    stop_hook_file.write_text('''"""ATLAST ECP — Claude Code Stop hook.
+    try:
+        from importlib import resources as _resources
+        stop_template = _resources.files("atlast_ecp").joinpath("_claude_stop_hook_template.py").read_text(encoding="utf-8")
+    except Exception:
+        stop_template = None
+    if not stop_template:
+        # Dev-checkout fallback: read from the package source tree
+        try:
+            import atlast_ecp as _ae
+            _tpl = Path(_ae.__file__).parent / "_claude_stop_hook_template.py"
+            if _tpl.exists():
+                stop_template = _tpl.read_text(encoding="utf-8")
+        except Exception:
+            stop_template = None
+    if stop_template:
+        stop_hook_file.write_text(stop_template)
+    else:
+        # Last-resort stub: if template is missing, install a no-op so we don't crash
+        stop_hook_file.write_text("# atlast stop hook template missing — upgrade atlast-ecp\n")
+    _legacy_stop_template = '''"""ATLAST ECP — Claude Code Stop hook (legacy, replaced by template file).
 Fires after EVERY Claude Code response (including pure chat).
 Reads the session transcript and records the latest conversation turn.
 """
@@ -1660,7 +1681,8 @@ def main():
 
 if __name__ == "__main__":
     main()
-''')
+'''  # end of _legacy_stop_template (retained for reference only; not written)
+    del _legacy_stop_template
     stop_hook_command = f"{python_bin} {stop_hook_file}"
 
     hooks = settings.setdefault("hooks", {})

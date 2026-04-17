@@ -249,17 +249,15 @@ def save_vault_v2(record_id: str, input_content: str, output_content: str,
 
         if extra:
             vault_data["vault_version"] = extra.get("vault_version", 2)
-            # Only include system_prompt if present (first time or changed)
-            if extra.get("system_prompt") is not None:
-                vault_data["system_prompt"] = extra["system_prompt"]
-            if extra.get("full_request_hash"):
-                vault_data["full_request_hash"] = extra["full_request_hash"]
-            if extra.get("full_response_hash"):
-                vault_data["full_response_hash"] = extra["full_response_hash"]
-            if extra.get("context_messages_count"):
-                vault_data["context_messages_count"] = extra["context_messages_count"]
-            if extra.get("session_id"):
-                vault_data["session_id"] = extra["session_id"]
+            # Merge all remaining extra fields. Callers are trusted
+            # (proxy, hooks, adapters) to pass only JSON-safe, non-sensitive data.
+            # None values are treated as "omit" so callers can dedupe (e.g. system_prompt).
+            for k, v in extra.items():
+                if k in ("vault_version", "record_id", "input", "output"):
+                    continue
+                if v is None:
+                    continue
+                vault_data[k] = v
 
         indent = 2 if mode == "full" else None
         content_json = json.dumps(vault_data, ensure_ascii=False, indent=indent)
