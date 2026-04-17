@@ -271,6 +271,7 @@ def record_minimal_v2(
     vault_extra: Optional[dict] = None,
     flags: Optional[list] = None,
     thread_id: Optional[str] = None,
+    record_id: Optional[str] = None,
 ) -> Optional[str]:
     """
     Minimal ECP recording with Vault v2 support (Proxy path).
@@ -342,10 +343,17 @@ def record_minimal_v2(
             out_content=output_content,
             meta=meta if meta else None,
         )
-        save_record(rec)
+        # Caller can pin a deterministic id (e.g. transcript_scanner). If so,
+        # overwrite the generated random id — downstream upsert uses this to
+        # replace prior versions of the same turn's record.
+        if record_id:
+            rec["id"] = record_id
+        from .storage import save_record as _save_record, save_vault_v2, upsert_record
+        if record_id:
+            upsert_record(rec)
+        else:
+            _save_record(rec)
 
-        # Save vault v2 with audit metadata
-        from .storage import save_vault_v2
         save_vault_v2(
             record_id=rec["id"],
             input_content=input_content if isinstance(input_content, str) else str(input_content),

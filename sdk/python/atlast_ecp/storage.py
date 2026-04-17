@@ -164,6 +164,87 @@ def load_local_summary(record_id: str) -> Optional[str]:
 # Stores raw input/output content locally so users can pair hashes with content.
 # NEVER transmitted. NEVER leaves the device. Only for local audit/inspect.
 
+def upsert_record(record_dict: dict) -> str:
+    """Write a record by id, replacing any prior version with the same id.
+
+    Used by transcript_scanner so the same turn (deterministic id) can be
+    written multiple times as more transcript entries arrive — each write
+    supersedes the last. The daily JSONL file is rewritten with the prior
+    version's line removed and the new one appended.
+
+    Evidence-chain note: deterministic-id records form their own continuity
+    — each update has a new chain_hash derived from the new content. The
+    prior chain_hash is no longer referenced by future records since the
+    index points to the latest line only. Readers who trust chain linking
+    should rely on the *latest* record per id.
+    """
+    init_storage()
+    rid = record_dict["id"]
+
+    from .config import get_storage_compress
+    compress = get_storage_compress()
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    record_file = RECORDS_DIR / (f"{today}.jsonl.gz" if compress else f"{today}.jsonl")
+
+    with _lock:
+        # If a prior version of this id lives anywhere on disk, rewrite that
+        # file with the old line removed. We then append the new line to
+        # today's file so the index points at the freshest copy.
+        index = _load_index()
+        prior = index.get(rid)
+        prior_file = Path(prior["file"]) if prior and prior.get("file") else None
+        if prior_file and prior_file.exists():
+            try:
+                with _open_record_file(prior_file, "r") as rh:
+                    lines = rh.read().splitlines()
+                kept = []
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        kept.append(line)
+                        continue
+                    if obj.get("id") == rid:
+                        continue  # drop the old version
+                    kept.append(line)
+                with _open_record_file(prior_file, "w") as wh:
+                    for line in kept:
+                        wh.write(line + "\n")
+            except Exception:
+                pass  # Fail-Open — at worst we end up with a duplicate we can dedupe later
+
+        # Append the new version to today's file
+        with _open_record_file(record_file, "a") as f:
+            f.write(json.dumps(record_dict, ensure_ascii=False) + "\n")
+
+        # Point the index at the new location
+        index[rid] = {"file": str(record_file), "date": today}
+        INDEX_FILE.write_text(json.dumps(index, indent=2))
+
+        # Invalidate SQLite search index so the next query rebuilds with the
+        # updated data. Cheaper than doing a per-row upsert here and avoids
+        # duplicating the enrichment logic that lives in query.rebuild_index.
+        try:
+            import sqlite3
+            from .query import INDEX_DB
+            if INDEX_DB.exists():
+                conn = sqlite3.connect(str(INDEX_DB))
+                try:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO index_state(key, value) VALUES('last_rebuild', 0)"
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+        except Exception:
+            pass
+
+    return rid
+
+
 def save_vault(record_id: str, input_content: str, output_content: str) -> None:
     """Save raw content to vault for local inspection. Never transmitted.
 

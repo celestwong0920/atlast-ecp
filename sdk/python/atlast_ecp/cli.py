@@ -1829,6 +1829,64 @@ def _auto_register(identity: dict):
             raise
 
 
+def cmd_sync(args: list[str]):
+    """atlast sync [--session <path>] [--all]
+
+    Scan Claude Code transcripts and write byte-for-byte complete records
+    for every turn. Safe to run anytime — same turn always gets the same
+    deterministic record id, so re-running just refreshes in-progress turns
+    and skips finalized ones.
+    """
+    from pathlib import Path
+    from .transcript_scanner import scan_and_record, scan_all_sessions
+
+    session_path = None
+    scan_all = False
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--session" and i + 1 < len(args):
+            session_path = args[i + 1]
+            i += 2
+            continue
+        if a in ("--all", "-a"):
+            scan_all = True
+            i += 1
+            continue
+        if a in ("--help", "-h"):
+            print(cmd_sync.__doc__)
+            return
+        i += 1
+
+    def log(msg):
+        print(msg)
+
+    if session_path:
+        path = Path(session_path)
+        if not path.exists():
+            print(f"Error: transcript not found: {path}")
+            sys.exit(1)
+        summary = scan_and_record(path, log=log)
+        print()
+        print(f"✓ Session {summary['session_id'][:12]}: "
+              f"{summary['turns_recorded']}/{summary['turns_scanned']} turns recorded "
+              f"({summary['turns_skipped_finalized']} already final, "
+              f"{summary['subagents_recorded']} subagents)")
+        return
+
+    # Default: scan all changed sessions since last run
+    print("Scanning ~/.claude/projects for transcript changes...")
+    results = scan_all_sessions(log=log)
+    if not results:
+        print("✓ Nothing to update (all transcripts unchanged since last sync).")
+        return
+    total_turns = sum(r["turns_recorded"] for r in results)
+    total_subs = sum(r["subagents_recorded"] for r in results)
+    print()
+    print(f"✓ Updated {len(results)} session(s): "
+          f"{total_turns} turns recorded, {total_subs} subagents recorded")
+
+
 def cmd_recover(args: list[str]):
     """atlast recover — restore identity from 12-word recovery phrase"""
     from .recovery import mnemonic_to_entropy, entropy_to_ed25519_seed
@@ -3056,6 +3114,7 @@ def main():
         "recover": cmd_recover,
         "backup-key": cmd_backup_key,
         "backup": cmd_backup,
+        "sync": cmd_sync,
     }
 
     if cmd in ("--help", "-h", "help"):
