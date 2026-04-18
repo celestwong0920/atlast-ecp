@@ -3356,9 +3356,41 @@ _DISCORD_WEBHOOK = os.environ.get("ATLAST_DISCORD_WEBHOOK", "")
 # New users channel — set via env or replace with actual webhook URL after creating Discord channel
 _DISCORD_NEW_USERS_WEBHOOK = os.environ.get("ATLAST_DISCORD_NEW_USERS_WEBHOOK", "")
 
+# Local cool-down (per source) to prevent runaway telemetry. A user running
+# `atlast init` in a loop, or a broken cron script invoking `doctor --report`
+# every second, must not flood the Discord channel. We keep per-source marker
+# files in ~/.ecp/.discord_throttle/ and refuse sends inside the window.
+_DISCORD_THROTTLE_WINDOW_S = int(os.environ.get("ATLAST_DISCORD_THROTTLE_S", "600"))
+
+
+def _discord_throttle_ok(source: str) -> bool:
+    """Return True if it's OK to send a Discord alert for this `source`.
+    Fail-open on any filesystem error."""
+    try:
+        from pathlib import Path
+        import time as _time
+        throttle_dir = Path.home() / ".ecp" / ".discord_throttle"
+        throttle_dir.mkdir(parents=True, exist_ok=True)
+        safe_source = "".join(c for c in source if c.isalnum() or c in "-_") or "default"
+        marker = throttle_dir / safe_source
+        now = _time.time()
+        if marker.exists():
+            age = now - marker.stat().st_mtime
+            if age < _DISCORD_THROTTLE_WINDOW_S:
+                return False
+        marker.write_text(str(now))
+        return True
+    except Exception:
+        return True  # fail-open: never block the user on telemetry
+
 
 def _send_discord_alert(source: str, details: dict, silent: bool = False):
-    """Send alert to ATLAST Discord #bug-reports. Fail-open, never blocks."""
+    """Send alert to ATLAST Discord #bug-reports. Fail-open, never blocks.
+
+    Per-source throttle: same source can send at most once per
+    ATLAST_DISCORD_THROTTLE_S seconds (default 600 = 10 min) to prevent
+    loop-abuse flooding the team's channel.
+    """
     import urllib.request
     import platform
     try:
@@ -3394,6 +3426,10 @@ def _send_discord_alert(source: str, details: dict, silent: bool = False):
 
     if not _DISCORD_WEBHOOK:
         return  # No webhook configured — skip silently
+    if not _discord_throttle_ok(source):
+        if not silent:
+            print(f"  (Throttled — same '{source}' report already sent within the last {_DISCORD_THROTTLE_WINDOW_S // 60} min)")
+        return
     payload = json.dumps({"content": "\n".join(lines)[:1900]})
     try:
         req = urllib.request.Request(
@@ -3438,6 +3474,11 @@ def _send_new_user_notification(did: str, agent_name: str = "", source: str = "C
     import time as _time2
     lines.append(f"\n*{_time2.strftime('%Y-%m-%d %H:%M UTC', _time2.gmtime())}*")
 
+    # Per-DID throttle: a given DID should register "new user" once.
+    # File-based marker with a very long window (1 year) — duplicates past
+    # that are rare and probably signal legit re-install after wipe.
+    if not _discord_throttle_ok(f"new_user_{did[:24]}"):
+        return
     payload = json.dumps({
         "content": "\n".join(lines),
         "username": "ATLAST New Users",
