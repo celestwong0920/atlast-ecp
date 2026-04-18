@@ -44,9 +44,21 @@ def _open_record_file(file_path: Path, mode: str = "r"):
             yield fh
 
 
+_DATE_RE = __import__("re").compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
 def _iter_record_files(date: Optional[str] = None):
-    """Yield record file paths (both .jsonl and .jsonl.gz), newest first."""
+    """Yield record file paths (both .jsonl and .jsonl.gz), newest first.
+
+    `date` must be `YYYY-MM-DD` if provided. We interpolate it straight into a
+    filename, so an unvalidated value like "../../etc/passwd" could point the
+    Path outside RECORDS_DIR. Strict regex prevents that.
+    """
     if date:
+        if not _DATE_RE.match(date):
+            raise ValueError(
+                f"Invalid date {date!r}: expected YYYY-MM-DD (e.g. 2026-04-19)"
+            )
         candidates = [
             RECORDS_DIR / f"{date}.jsonl.gz",
             RECORDS_DIR / f"{date}.jsonl",
