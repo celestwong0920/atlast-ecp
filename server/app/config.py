@@ -14,7 +14,10 @@ class Settings:
     EAS_PRIVATE_KEY: str = os.getenv("EAS_PRIVATE_KEY", "")
     EAS_SCHEMA_UID: str = os.getenv("EAS_SCHEMA_UID", "0xa67da7e880b3fe643f0e12b754c6048fc0a0bad0ed9a932ac85a5ebf6bd9326e")
     EAS_CHAIN: str = os.getenv("EAS_CHAIN", "sepolia")
-    EAS_STUB_MODE: str = os.getenv("EAS_STUB_MODE", "true")
+    # Empty default = not configured. Startup validation below forces the
+    # operator to make an explicit choice in any non-dev environment, so
+    # production can never silently run in stub mode (fake attestations).
+    EAS_STUB_MODE: str = os.getenv("EAS_STUB_MODE", "")
 
     # Webhook (Atlas → LLaChat)
     ECP_WEBHOOK_URL: str = os.getenv("ECP_WEBHOOK_URL", "https://api.llachat.com/v1/internal/ecp-webhook")
@@ -48,16 +51,43 @@ class Settings:
 
 settings = Settings()
 
-# Production safety checks (warn, don't crash — avoid breaking existing deployments)
+# ── Startup validation (fail-closed) ─────────────────────────────────────────
+# Previously this block only logged warnings — a misconfigured production
+# deployment could silently run with stub attestations, telling users their
+# batches were "anchored" when they weren't. We now raise at import time so
+# any non-dev environment must explicitly declare its EAS mode.
 import logging as _logging
 _startup_logger = _logging.getLogger("atlast.startup")
-if (settings.ENVIRONMENT or "").strip().lower() not in _DEV_ENVIRONMENTS:
-    # fail-closed: any non-whitelisted ENVIRONMENT (production, staging, typo,
-    # missing) runs under production-grade startup checks.
-    if not settings.EAS_PRIVATE_KEY and settings.EAS_STUB_MODE != "true":
-        _startup_logger.warning(
-            "EAS_PRIVATE_KEY not set — on-chain anchoring will fail. "
-            "Set EAS_PRIVATE_KEY or EAS_STUB_MODE=true"
+
+_env_norm = (settings.ENVIRONMENT or "").strip().lower()
+_is_dev = _env_norm in _DEV_ENVIRONMENTS
+_stub_norm = (settings.EAS_STUB_MODE or "").strip().lower()
+
+if not _is_dev:
+    # Production / staging / unknown: EAS mode must be explicit.
+    if _stub_norm == "":
+        raise RuntimeError(
+            "ATLAST server startup: EAS_STUB_MODE is not configured.\n"
+            f"  ENVIRONMENT={settings.ENVIRONMENT!r} is treated as production "
+            "(any value outside the dev whitelist).\n"
+            "  Set one of:\n"
+            "    EAS_STUB_MODE=true                              (stub: no on-chain tx)\n"
+            "    EAS_STUB_MODE=false + EAS_PRIVATE_KEY=<key>     (live on-chain)\n"
+            "  Refusing to start rather than silently pretending to anchor."
+        )
+    if _stub_norm == "false" and not settings.EAS_PRIVATE_KEY:
+        raise RuntimeError(
+            "ATLAST server startup: EAS_STUB_MODE=false requires EAS_PRIVATE_KEY. "
+            "Set the wallet private key, or switch EAS_STUB_MODE=true to run without on-chain writes."
         )
     if not settings.DATABASE_URL:
-        _startup_logger.warning("DATABASE_URL not set — batch storage will be unavailable")
+        _startup_logger.warning(
+            "DATABASE_URL not set in non-dev environment — batch storage will be unavailable"
+        )
+else:
+    # Dev whitelist: stub is the implicit, safe default when not set.
+    if _stub_norm == "":
+        settings.EAS_STUB_MODE = "true"
+        _startup_logger.info(
+            "Dev environment: defaulting EAS_STUB_MODE=true (no on-chain writes)."
+        )

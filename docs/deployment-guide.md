@@ -18,7 +18,7 @@ The ECP Server is deployed on [Railway](https://railway.app) with auto-deploy fr
 | `EAS_PRIVATE_KEY` | ✅ | Ethereum wallet private key for EAS | `0x...` (64 hex chars) |
 | `EAS_SCHEMA_UID` | ✅ | EAS schema UID | `0xa67da7e...` |
 | `EAS_CHAIN` | ✅ | `sepolia` or `base` | `sepolia` |
-| `EAS_STUB_MODE` | ❌ | `true` to skip real anchoring | `false` |
+| `EAS_STUB_MODE` | ✅ | **Required in production**: `true` (stub, no on-chain) or `false` (real on-chain; also requires `EAS_PRIVATE_KEY`). Server refuses to start if unset in non-dev environments. | `false` |
 | `ECP_WEBHOOK_URL` | ❌ | Webhook endpoint for attestation events | `https://api.llachat.com/v1/internal/ecp-webhook` |
 | `ECP_WEBHOOK_TOKEN` | ❌ | HMAC shared secret for webhook | `your-webhook-secret...` |
 | `LLACHAT_API_URL` | ❌ | LLaChat API base URL | `https://api.llachat.com` |

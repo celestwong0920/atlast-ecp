@@ -52,6 +52,66 @@ async def test_c1_stub_mode_still_works():
         assert "stub_" in result["attestation_uid"]
 
 
+# ── C1 (extended): EAS_STUB_MODE must be explicit in non-dev ──────────────────
+
+
+def _run_config_import(env_overrides):
+    """Import app.config in a subprocess with specified env vars. Returns
+    (exit_code, stderr_text). Clean subprocess avoids polluting this process."""
+    import subprocess, sys, os as _os
+    env = {**_os.environ, **env_overrides}
+    # Ensure we hit the repo's app package, not any installed copy.
+    env["PYTHONPATH"] = str(_os.path.join(_os.path.dirname(__file__), ".."))
+    r = subprocess.run(
+        [sys.executable, "-c", "import app.config"],
+        capture_output=True, text=True, env=env,
+    )
+    return r.returncode, r.stderr
+
+
+def test_c1_startup_refuses_production_without_eas_mode():
+    """Non-dev ENVIRONMENT with no EAS_STUB_MODE must refuse to start."""
+    code, err = _run_config_import({
+        "ENVIRONMENT": "production", "EAS_STUB_MODE": "", "EAS_PRIVATE_KEY": "",
+    })
+    assert code != 0
+    assert "EAS_STUB_MODE is not configured" in err
+
+
+def test_c1_startup_refuses_staging_without_eas_mode():
+    """Staging (non-whitelist) must be treated as production and refuse."""
+    code, err = _run_config_import({
+        "ENVIRONMENT": "staging", "EAS_STUB_MODE": "", "EAS_PRIVATE_KEY": "",
+    })
+    assert code != 0
+    assert "EAS_STUB_MODE is not configured" in err
+
+
+def test_c1_startup_refuses_stub_false_without_private_key():
+    """EAS_STUB_MODE=false requires EAS_PRIVATE_KEY in non-dev."""
+    code, err = _run_config_import({
+        "ENVIRONMENT": "production", "EAS_STUB_MODE": "false", "EAS_PRIVATE_KEY": "",
+    })
+    assert code != 0
+    assert "requires EAS_PRIVATE_KEY" in err
+
+
+def test_c1_startup_allows_production_with_explicit_stub_true():
+    """Production + EAS_STUB_MODE=true is a valid explicit configuration."""
+    code, err = _run_config_import({
+        "ENVIRONMENT": "production", "EAS_STUB_MODE": "true", "EAS_PRIVATE_KEY": "",
+    })
+    assert code == 0, err
+
+
+def test_c1_startup_allows_dev_without_eas_config():
+    """Dev environment auto-defaults EAS_STUB_MODE to true — no explicit config needed."""
+    code, err = _run_config_import({
+        "ENVIRONMENT": "development", "EAS_STUB_MODE": "", "EAS_PRIVATE_KEY": "",
+    })
+    assert code == 0, err
+
+
 # ── C2: Batch Upload Auth ────────────────────────────────────────────────────
 
 

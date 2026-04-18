@@ -48,7 +48,7 @@ This server runs on [Railway](https://railway.app) from the `server/` directory 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANCHOR_INTERVAL_MINUTES` | `60` | Cron anchor interval |
-| `EAS_STUB_MODE` | `false` | Skip real EAS (for testing) |
+| `EAS_STUB_MODE` | *(required in non-dev)* | `true` = stub attestations (no on-chain tx), `false` = real EAS on Base (also requires `EAS_PRIVATE_KEY`). Server refuses to start if unset outside the dev whitelist. |
 | `SENTRY_DSN` | — | Sentry error tracking |
 | `PORT` | `8000` | HTTP port |
 
