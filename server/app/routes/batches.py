@@ -177,21 +177,23 @@ async def upload_batch(
     # Generate batch_id
     batch_id = f"batch_{secrets.token_hex(8)}"
 
-    # Deduplication: reject if identical merkle_root from same agent within 5 minutes
+    # Deduplication: reject if identical (agent_did, merkle_root) already exists.
+    # Permanent dedup — previously the check had a 24h cutoff, which let an
+    # attacker wait 25h then replay the same batch to force another on-chain
+    # anchor. A legitimately identical merkle_root across the same agent is
+    # cryptographically implausible (the root commits to every record's hash
+    # + batch_ts), so rejecting forever is safe.
     session = await get_session()
     if session is not None:
         try:
             from sqlalchemy import select, and_
-            from datetime import timedelta
             from ..db.models import Batch as BatchModel
             async with session:
-                cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
                 dup = await session.execute(
                     select(BatchModel.batch_id).where(
                         and_(
                             BatchModel.agent_did == req.agent_did,
                             BatchModel.merkle_root == req.merkle_root,
-                            BatchModel.created_at >= cutoff,
                         )
                     ).limit(1)
                 )
@@ -200,7 +202,7 @@ async def upload_batch(
                     return BatchUploadResponse(
                         batch_id=existing,
                         status="duplicate",
-                        message="Identical batch already submitted within the last 24 hours.",
+                        message="Identical (agent_did, merkle_root) already submitted — permanent dedup.",
                     )
         except Exception as e:
             logger.warning("dedup_check_failed", error=str(e))
