@@ -8,7 +8,10 @@ Usage: atlast dashboard [--port 3827] [--no-open]
 """
 
 import json
+import os
+import signal
 import threading
+import time
 import webbrowser
 from datetime import datetime, timezone, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -17,6 +20,11 @@ from urllib.parse import urlparse, parse_qs
 
 ASSETS_DIR = Path(__file__).parent / "dashboard_assets"
 DEFAULT_PORT = 3827
+
+# Singleton-enforcement PID file. Holds a JSON blob describing the currently
+# running dashboard instance (pid, version, bind). Read on every `start_dashboard`
+# call to prevent duplicate processes and to migrate across SDK upgrades.
+_PID_FILE = Path.home() / ".ecp" / "dashboard.pid"
 
 
 _TRUST_SCORE_CACHE: dict = {"ts": 0.0, "map": {}}
@@ -1221,13 +1229,144 @@ body.guide-dismissed { padding-top: 0 !important; }
 </script>'''
 
 
-def start_dashboard(port: int = DEFAULT_PORT, open_browser: bool = True, host: str = "127.0.0.1"):
-    """Start the local dashboard server."""
-    server = ThreadingHTTPServer((host, port), DashboardHandler)
-    # Make worker threads daemonic so Ctrl-C stops them with the main thread
-    server.daemon_threads = True
-    url = f"http://{host}:{port}"
+def _read_pid_file():
+    """Return the PID-file payload (dict) or None if missing/invalid."""
+    try:
+        if not _PID_FILE.exists():
+            return None
+        data = json.loads(_PID_FILE.read_text())
+        if isinstance(data, dict) and "pid" in data:
+            return data
+    except Exception:
+        pass
+    return None
 
+
+def _process_alive(pid: int) -> bool:
+    """Cross-platform: is `pid` a running process? Signal 0 = check-only."""
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def _write_pid_file(port: int, host: str) -> None:
+    """Record this dashboard instance's metadata so future starts see us."""
+    try:
+        from . import __version__
+    except Exception:
+        __version__ = "unknown"
+    try:
+        _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _PID_FILE.write_text(json.dumps({
+            "pid": os.getpid(),
+            "version": __version__,
+            "host": host,
+            "port": port,
+            "started_at": time.time(),
+        }))
+    except Exception:
+        pass  # fail-open: we'd rather run without singleton than crash
+
+
+def _cleanup_pid_file() -> None:
+    """Best-effort remove PID file on graceful shutdown."""
+    try:
+        existing = _read_pid_file()
+        if existing and existing.get("pid") == os.getpid():
+            _PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _check_singleton(port: int, host: str) -> str:
+    """Return one of:
+      - 'proceed'         — nothing else running, safe to start
+      - 'exit_same'       — our exact version already bound this port, back off
+      - 'replaced_old'    — killed an older-version dashboard, proceed to bind
+
+    Distinguishes "same version" from "older version" so the common upgrade
+    path ("pip install -U atlast-ecp" then relaunch) auto-migrates instead
+    of leaving the old process running the old code.
+    """
+    try:
+        from . import __version__
+    except Exception:
+        __version__ = "unknown"
+
+    existing = _read_pid_file()
+    if not existing or not _process_alive(existing.get("pid", 0)):
+        # Stale or missing PID file — previous process already gone
+        return "proceed"
+
+    existing_ver = existing.get("version", "unknown")
+    existing_port = int(existing.get("port", 0))
+    existing_host = existing.get("host", "")
+    existing_pid = int(existing.get("pid", 0))
+
+    # Different port → not our concern
+    if existing_port != port:
+        return "proceed"
+
+    if existing_ver == __version__:
+        print(f"\n  ✅ Dashboard already running (PID {existing_pid}, v{existing_ver})")
+        print(f"     at http://{existing_host}:{existing_port}")
+        print(f"     To stop: kill {existing_pid}\n")
+        return "exit_same"
+
+    # Same port, older version — self-healing upgrade path
+    print(f"\n  ⚠️  Older dashboard (v{existing_ver}, PID {existing_pid}) running at :{port}")
+    print(f"     This process (v{__version__}) will replace it.")
+    try:
+        os.kill(existing_pid, signal.SIGTERM)
+        for _ in range(20):  # wait up to 2 s for graceful shutdown
+            time.sleep(0.1)
+            if not _process_alive(existing_pid):
+                break
+        if _process_alive(existing_pid):
+            os.kill(existing_pid, signal.SIGKILL)
+            time.sleep(0.5)
+        print(f"  ✅ Stopped old dashboard\n")
+        return "replaced_old"
+    except Exception as e:
+        print(f"  ❌ Could not stop old dashboard: {e}")
+        print(f"     Manual fix: kill -9 {existing_pid}\n")
+        return "exit_same"  # can't safely proceed
+
+
+def start_dashboard(port: int = DEFAULT_PORT, open_browser: bool = True, host: str = "127.0.0.1"):
+    """Start the local dashboard server.
+
+    Singleton-enforced: if another instance of the same SDK version is
+    already serving this port, we print the URL and exit. If an older
+    version is running, we kill it and take over (self-healing upgrade).
+    """
+    # ── 1. Singleton check (PID-file based) ──────────────────────────────
+    decision = _check_singleton(port, host)
+    if decision == "exit_same":
+        if open_browser:
+            webbrowser.open(f"http://{host}:{port}")
+        return
+
+    # ── 2. Bind the port. If OSError, another non-atlast process owns it ─
+    try:
+        server = ThreadingHTTPServer((host, port), DashboardHandler)
+    except OSError as e:
+        print(f"\n  ❌ Cannot bind {host}:{port} — another process is using it.")
+        print(f"     {e}")
+        print(f"     Diagnose: lsof -nP -iTCP:{port} -sTCP:LISTEN\n")
+        return
+    server.daemon_threads = True
+
+    # ── 3. Record this instance so the next `atlast dashboard` sees us ──
+    _write_pid_file(port, host)
+    import atexit as _atexit
+    _atexit.register(_cleanup_pid_file)
+
+    url = f"http://{host}:{port}"
     print("\n  📊 ATLAST ECP Dashboard")
     print(f"  Running at: {url}")
     print("  Data: ~/.ecp/ (local only, nothing leaves your machine)")
@@ -1241,3 +1380,5 @@ def start_dashboard(port: int = DEFAULT_PORT, open_browser: bool = True, host: s
     except KeyboardInterrupt:
         print("\n  Dashboard stopped.")
         server.server_close()
+    finally:
+        _cleanup_pid_file()

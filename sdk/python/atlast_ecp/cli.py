@@ -3495,24 +3495,81 @@ def _send_new_user_notification(did: str, agent_name: str = "", source: str = "C
         pass  # Fail-open
 
 
+_SAFE_HOSTS = {"127.0.0.1", "localhost", "::1", "0", ""}
+
+
+def _dashboard_check_launchagent():
+    """On macOS, warn if no LaunchAgent plist — dashboard won't auto-start on reboot.
+    Silent on Linux/Windows. Purely advisory; does not block startup."""
+    import platform
+    if platform.system() != "Darwin":
+        return
+    plist = Path.home() / "Library" / "LaunchAgents" / "ai.atlast.ecp.dashboard.plist"
+    if not plist.exists():
+        print("\n  ℹ️  Tip: Dashboard will NOT auto-start on reboot (no LaunchAgent found).")
+        print("     Run `atlast init` to install the LaunchAgent (idempotent, preserves identity).\n")
+
+
 def cmd_dashboard(args: list[str]):
-    """atlast dashboard [--port 3827] [--no-open] [--host 0.0.0.0] — launch local web dashboard"""
+    """atlast dashboard [--port 3827] [--no-open] [--unsafe-expose-to-lan] — launch local web dashboard"""
     port = 3827
     host = "127.0.0.1"
     open_browser = True
+    explicit_host = None
+    unsafe_expose = False
     i = 0
     while i < len(args):
         if args[i] == "--port" and i + 1 < len(args):
             port = int(args[i + 1])
             i += 2
         elif args[i] == "--host" and i + 1 < len(args):
-            host = args[i + 1]
+            explicit_host = args[i + 1]
             i += 2
         elif args[i] == "--no-open":
             open_browser = False
             i += 1
+        elif args[i] == "--unsafe-expose-to-lan":
+            unsafe_expose = True
+            i += 1
         else:
             i += 1
+
+    # ── Host safety ─────────────────────────────────────────────────────
+    # The dashboard serves ALL the user's records, DIDs, and trust scores.
+    # Binding anything other than loopback exposes this trove to every
+    # machine that can reach the host. We previously accepted --host 0.0.0.0
+    # silently (just passed it through); that let a user copy-paste an old
+    # command and unknowingly serve private data to their LAN/Tailnet for
+    # weeks. New policy: only loopback by default; LAN bind requires the
+    # loudly-named --unsafe-expose-to-lan flag and prints a red banner.
+    if explicit_host is not None:
+        if explicit_host in _SAFE_HOSTS:
+            host = explicit_host if explicit_host else "127.0.0.1"
+        elif not unsafe_expose:
+            print("\n  ❌ --host " + explicit_host + " would expose the dashboard beyond loopback.")
+            print("     The dashboard serves records, DID, trust score, vault summaries —")
+            print("     treat it as private data. Default is 127.0.0.1 for that reason.")
+            print("")
+            print("     Safer alternative (browser on another machine):")
+            print(f"       ssh -L {port}:localhost:{port} user@this-host")
+            print("")
+            print("     If you really need LAN bind (workshop demo, etc.), add:")
+            print("       --unsafe-expose-to-lan")
+            print("     The explicit flag name documents the risk for the next reader.\n")
+            return
+        else:
+            host = explicit_host
+            bar = "=" * 64
+            print("")
+            print("  " + bar)
+            print("  ⚠️  WARNING — DASHBOARD EXPOSED BEYOND LOOPBACK")
+            print("  " + bar)
+            print(f"  Bind address:  {host}:{port}")
+            print(f"  Anyone who can reach this host can read your records + DID.")
+            print(f"  Safer: ssh -L {port}:localhost:{port} user@this-host")
+            print("  " + bar + "\n")
+
+    _dashboard_check_launchagent()
 
     from .dashboard_server import start_dashboard
     start_dashboard(port=port, open_browser=open_browser, host=host)
