@@ -163,7 +163,15 @@ async def upload_batch(
         except HTTPException:
             raise
         except Exception as e:
-            logger.warning("sig_verify_check_failed", error=str(e))
+            # Fail-closed: if the verification plumbing (DB query, public key
+            # parsing, session acquisition) fails while a signature was provided,
+            # we cannot prove the batch is legitimate. Better to 503 and let the
+            # client retry than silently accept an unverified batch and store it.
+            logger.error("sig_verify_check_failed", error=str(e), did=req.agent_did)
+            raise HTTPException(
+                status_code=503,
+                detail="Signature verification temporarily unavailable — retry later",
+            )
 
     # Per-agent rate limit
     if not _check_agent_rate(req.agent_did, rate_tier):
