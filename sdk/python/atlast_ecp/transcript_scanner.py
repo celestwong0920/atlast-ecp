@@ -57,6 +57,7 @@ _CLAUDE_INTERNAL_PREFIXES = (
     "<command-args>",
     "<system-reminder>",      # platform-injected reminders
     "<user-prompt-submit-hook>",
+    "<task-notification>",    # async background-task completion events
     "<ide_",                  # IDE-injected blocks
     "<function_",
     "[Request interrupted",   # Ctrl-C interrupt markers
