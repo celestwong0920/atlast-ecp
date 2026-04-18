@@ -112,6 +112,61 @@ def test_c1_startup_allows_dev_without_eas_config():
     assert code == 0, err
 
 
+# ── H3: Register endpoint rate limit ─────────────────────────────────────────
+
+
+def test_h3_register_rate_limit_active_in_production():
+    """When RATELIMIT_ENABLED=true, /v1/agents/register caps at 5/hour per IP.
+    Runs in a subprocess so the module-level env-based enable flag is evaluated
+    in isolation (not polluted by conftest's dev settings)."""
+    import subprocess, sys, os as _os
+    env = {
+        **_os.environ,
+        "ENVIRONMENT": "production",
+        "EAS_STUB_MODE": "true",
+        "RATELIMIT_ENABLED": "true",
+        "DATABASE_URL": "",  # fall through to DB-unavailable path; we only care about rate limit
+        "PYTHONPATH": str(_os.path.join(_os.path.dirname(__file__), "..")),
+    }
+    r = subprocess.run(
+        [sys.executable, "-c", """
+from fastapi.testclient import TestClient
+from app.main import app
+c = TestClient(app)
+statuses = []
+for i in range(8):
+    resp = c.post('/v1/agents/register', json={'did': f'did:ecp:{i:064x}', 'public_key': 'a'*64})
+    statuses.append(resp.status_code)
+print(statuses)
+assert 429 in statuses, f'No 429 after 8 requests: {statuses}'
+assert statuses[:5].count(429) == 0, f'Rate limit triggered too early: {statuses}'
+"""],
+        capture_output=True, text=True, env=env,
+    )
+    assert r.returncode == 0, f"stdout={r.stdout}\nstderr={r.stderr}"
+
+
+def test_h3_register_rate_limit_disabled_in_dev():
+    """Dev environment defaults to disabled so stress tests aren't rate-limited."""
+    import subprocess, sys, os as _os
+    env = {
+        **_os.environ,
+        "ENVIRONMENT": "development",
+        "EAS_STUB_MODE": "true",
+        "DATABASE_URL": "",
+        "PYTHONPATH": str(_os.path.join(_os.path.dirname(__file__), "..")),
+    }
+    r = subprocess.run(
+        [sys.executable, "-c", """
+from app.ratelimit import limiter
+assert limiter.enabled is False, f'expected disabled in dev, got enabled={limiter.enabled}'
+print('OK: limiter disabled in dev')
+"""],
+        capture_output=True, text=True, env=env,
+    )
+    assert r.returncode == 0, f"stdout={r.stdout}\nstderr={r.stderr}"
+
+
 # ── C2: Batch Upload Auth ────────────────────────────────────────────────────
 
 

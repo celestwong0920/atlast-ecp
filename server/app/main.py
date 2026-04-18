@@ -18,15 +18,11 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from .config import settings, _DEV_ENVIRONMENTS
-
-# ── Rate Limiter ────────────────────────────────────────────────────────────
-
-limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+from .ratelimit import limiter
 
 # ── Structured Logging ──────────────────────────────────────────────────────
 

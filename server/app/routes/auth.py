@@ -19,6 +19,7 @@ import structlog
 
 from ..db.database import get_session
 from ..db.models import Agent, APIKey
+from ..ratelimit import limiter
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -132,6 +133,7 @@ def _verify_ownership_sig(public_key_hex: str, did: str, sig: str, ts: int) -> b
 
 
 @router.post("/v1/agents/register", response_model=RegisterResponse)
+@limiter.limit("5/hour")  # Anti-spam: DID registration from single IP
 async def register_agent(req: RegisterRequest, request: Request):
     """
     Register a new agent and return an API key.
