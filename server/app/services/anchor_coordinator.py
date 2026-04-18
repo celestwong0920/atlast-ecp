@@ -9,6 +9,7 @@ Responsibilities:
 """
 
 import asyncio
+import os
 import uuid
 import structlog
 from datetime import datetime, timezone, timedelta
@@ -25,7 +26,12 @@ _anchor_lock = asyncio.Lock()
 # ── Constants ───────────────────────────────────────────────────────────────
 
 MAX_RETRY_COUNT = 4
-MIN_GAS_BALANCE_WEI = 500_000_000_000_000  # 0.0005 ETH
+# Gas balance floor — refuse to anchor when wallet is close to empty.
+# Raised from 0.0005 ETH (~1.5 legitimate txs of buffer) to 0.01 ETH
+# (~30 txs of buffer). A single Base EAS attestation costs ~0.0003 ETH;
+# the prior floor would be eaten by one retry storm or a gas spike.
+# Env-tunable for ops so a deployment with larger/smaller spending can adjust.
+MIN_GAS_BALANCE_WEI = int(os.getenv("MIN_GAS_BALANCE_WEI", str(10_000_000_000_000_000)))  # 0.01 ETH
 LOCK_TTL_SECONDS = 300  # 5 minutes
 _INSTANCE_ID = f"inst_{uuid.uuid4().hex[:12]}"
 
