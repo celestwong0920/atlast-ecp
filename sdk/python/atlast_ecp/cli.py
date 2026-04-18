@@ -2235,8 +2235,9 @@ def cmd_proxy(args: list[str]):
     except ImportError:
         print("Error: aiohttp required for zero-code proxy.")
         print("")
-        print("  Install with:  pip install atlast-ecp[proxy]")
-        print("  Or install all: pip install atlast-ecp[all]")
+        print("  Install with:  pip install --user atlast-ecp[proxy]")
+        print("  Or install all: pip install --user atlast-ecp[all]")
+        print("  (drop --user if you're inside a venv)")
         print("")
         print("  Alternative (no extra install):")
         print("    from atlast_ecp import wrap")
@@ -2256,8 +2257,9 @@ def cmd_run(args: list[str]):
     except ImportError:
         print("Error: aiohttp required for 'atlast run'.")
         print("")
-        print("  Install with:  pip install atlast-ecp[proxy]")
-        print("  Or install all: pip install atlast-ecp[all]")
+        print("  Install with:  pip install --user atlast-ecp[proxy]")
+        print("  Or install all: pip install --user atlast-ecp[all]")
+        print("  (drop --user if you're inside a venv)")
         print("")
         print("  Alternative (no extra install):")
         print("    from atlast_ecp import wrap")
@@ -2748,8 +2750,38 @@ def cmd_doctor(args: list[str]):
         print(f"  ✅ atlast-ecp {ver}")
     except ImportError:
         print("  ❌ atlast-ecp not installed")
-        issues.append("Run: pip install atlast-ecp")
+        issues.append("Run: pip install --user atlast-ecp  (or drop --user inside a venv)")
         all_ok = False
+
+    # 2b. Install environment: detect PEP 668 and Homebrew Python so users
+    # get the right install command on their first doctor run rather than
+    # hitting "externally-managed-environment" in the terminal.
+    try:
+        import sysconfig
+        stdlib_dir = sysconfig.get_paths().get("stdlib", "")
+        is_homebrew = "/Cellar/" in stdlib_dir or "/homebrew/" in stdlib_dir.lower()
+        is_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+
+        # PEP 668 marker — a "EXTERNALLY-MANAGED" file in the stdlib dir
+        pep668_marker = None
+        if stdlib_dir:
+            from pathlib import Path as _P
+            candidate = _P(stdlib_dir) / "EXTERNALLY-MANAGED"
+            if candidate.exists():
+                pep668_marker = str(candidate)
+
+        if is_venv:
+            print(f"  ✅ Install env: active venv ({sys.prefix})")
+        elif pep668_marker:
+            label = "Homebrew Python" if is_homebrew else "externally-managed Python"
+            print(f"  ℹ️  Install env: {label} (PEP 668)")
+            print(f"      Use `pip install --user atlast-ecp` — the plain form is blocked.")
+        elif is_homebrew:
+            print(f"  ℹ️  Install env: Homebrew Python (non-PEP-668)")
+        else:
+            print(f"  ✅ Install env: system Python")
+    except Exception:
+        pass
 
     # 3. ECP directory
     from .storage import ECP_DIR

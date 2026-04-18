@@ -141,9 +141,9 @@ Copy this and paste it to your AI agent:
 
 > Install ATLAST ECP on this machine to create a tamper-proof evidence chain of all your work. ATLAST ECP is an open-source protocol that records every action with cryptographic proof — so I can verify what you did, track your reliability, and have a complete audit trail.
 >
-> Step 1 — Install:
+> Step 1 — Install (the `--user` flag handles Homebrew Python / PEP 668 distros automatically; inside a venv, drop it):
 > ```
-> pip3 install atlast-ecp
+> pip3 install --user atlast-ecp
 > ```
 >
 > Step 2 — Initialize (generates your unique identity + local storage):
@@ -163,7 +163,11 @@ That's it. Your agent handles the rest.
 ### Zero Code (any language, any framework)
 
 ```bash
-pip install atlast-ecp
+# One-liner installer (macOS / Linux; use install.ps1 on Windows PowerShell)
+curl -sSL https://weba0.com/install.sh | bash
+
+# or manually:
+pip install --user atlast-ecp     # or plain `pip install atlast-ecp` inside a venv
 
 # One command — every LLM call is now recorded
 atlast run python my_agent.py
@@ -273,7 +277,7 @@ atlast verify --a2a researcher.jsonl analyst.jsonl writer.jsonl
 </p>
 
 ### SDKs
-- **[Python SDK](sdk/)** — `pip install atlast-ecp` — 19 modules, 387 tests
+- **[Python SDK](sdk/)** — `pip install --user atlast-ecp` — 19 modules, 387 tests
 - **[TypeScript SDK](sdk/typescript/)** — `npm install atlast-ecp-ts` — 43 tests
 - **[Go SDK](sdk-go/)** — Pure stdlib, zero dependencies
 

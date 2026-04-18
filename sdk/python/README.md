@@ -9,15 +9,36 @@ Python SDK for the **ATLAST Evidence Chain Protocol (ECP)** — trust infrastruc
 
 ## Install
 
+**One-liner (handles Homebrew Python, venvs, PEP 668 distros automatically):**
+
 ```bash
+# macOS / Linux
+curl -sSL https://weba0.com/install.sh | bash
+
+# Windows (PowerShell)
+irm https://weba0.com/install.ps1 | iex
+```
+
+**Or install manually:**
+
+```bash
+# Default — works on Homebrew / system Python / locked-down distros
+pip install --user atlast-ecp
+
+# Inside a venv or conda env — drop the --user flag:
 pip install atlast-ecp
 
-# With ed25519 signing:
-pip install atlast-ecp[crypto]
-
-# With transparent proxy (Layer 0):
-pip install atlast-ecp[proxy]
+# Extras
+pip install --user atlast-ecp[crypto]   # ed25519 signing
+pip install --user atlast-ecp[proxy]    # transparent proxy (Layer 0)
+pip install --user atlast-ecp[all]      # everything
 ```
+
+> **Why `--user`?** Modern macOS Homebrew Python and Debian 12 / Ubuntu 23+
+> enforce [PEP 668](https://peps.python.org/pep-0668/) and reject plain
+> `pip install` with `externally-managed-environment`. `--user` installs to
+> your user site-packages and bypasses the restriction on every platform.
+> If you're already inside a virtualenv, you don't need `--user`.
 
 ## Three Integration Layers
 
