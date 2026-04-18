@@ -253,7 +253,7 @@ atlast verify --a2a researcher.jsonl analyst.jsonl writer.jsonl
 
 ### 服务端
 - **[参考服务器](server/)** — 开源 FastAPI + SQLite ECP 服务器
-- **[ECP 服务器规范](ECP-SERVER-SPEC.md)** — 构建你自己的 ECP 服务器
+- **[ECP 服务器 API](ECP-SERVER-API.md)** — 构建你自己的 ECP 服务器（端点、批处理、上链）
 
 ### 文档
 - **[ECP 规范](ECP-SPEC.md)** — 完整协议规范（5 级）

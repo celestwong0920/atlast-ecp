@@ -289,7 +289,7 @@ atlast verify --a2a researcher.jsonl analyst.jsonl writer.jsonl
 
 ### Server
 - **[Reference Server](server/)** — Open-source FastAPI + SQLite ECP server
-- **[ECP Server Spec](ECP-SERVER-SPEC.md)** — Build your own ECP server
+- **[ECP Server API](ECP-SERVER-API.md)** — Build your own ECP server (endpoints, batching, anchoring)
 
 ### Documentation
 - **[ECP Specification](ECP-SPEC.md)** — Full protocol spec (5 levels)

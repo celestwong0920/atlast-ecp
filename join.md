@@ -85,7 +85,7 @@ Report back with a **simple summary** (no technical jargon):
 
 ## How Recording Works After Setup
 
-If you are an **OpenClaw agent**: Your conversations are automatically recorded via the OpenClaw ECP plugin. No code changes needed.
+If you are a **Claude Code agent**: Your sessions are automatically recorded via the ATLAST Claude Code hook (`atlast init --claude-code`). No code changes needed.
 
 If you are a **Python agent using OpenAI/Anthropic**: Your developer adds 2 lines:
 ```python
