@@ -3125,6 +3125,73 @@ def cmd_doctor(args: list[str]):
     except Exception:
         pass  # Never break doctor on the multi-install check.
 
+    # 2d. Scan Claude Code transcripts for user-type entries whose content
+    # starts with an angle-bracket tag that the scanner's pseudo-message
+    # filter doesn't recognize. Every time Claude Code ships a new
+    # injection (<task-notification>, <command-name>, ...) we need that
+    # tag in _CLAUDE_INTERNAL_PREFIXES — otherwise the scanner records
+    # each injected event as a real user turn. This surfaces the list so
+    # we catch new tags the moment they appear in production transcripts.
+    try:
+        import re as _re
+        from pathlib import Path as _Path2
+        from .transcript_scanner import _CLAUDE_INTERNAL_PREFIXES as _known_prefixes
+
+        projects_dir = _Path2.home() / ".claude" / "projects"
+        if projects_dir.exists():
+            unknown_tags: dict = {}
+            scanned = 0
+            for jf in projects_dir.rglob("*.jsonl"):
+                if "/subagents/" in str(jf) or jf.name == "history.jsonl":
+                    continue
+                scanned += 1
+                if scanned > 200:
+                    break  # bound the walk for huge installs
+                try:
+                    lines = jf.read_text(encoding="utf-8").splitlines()
+                except Exception:
+                    continue
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        e = json.loads(line)
+                    except Exception:
+                        continue
+                    if e.get("type") != "user":
+                        continue
+                    c = e.get("message", {}).get("content", "")
+                    text = ""
+                    if isinstance(c, str):
+                        text = c.strip()
+                    elif isinstance(c, list):
+                        for b in c:
+                            if isinstance(b, dict) and b.get("type") == "text":
+                                text = (b.get("text", "") or "").strip()
+                                break
+                    if not text:
+                        continue
+                    if any(text.startswith(p) for p in _known_prefixes):
+                        continue
+                    m = _re.match(r"^<([a-z][\w-]*)", text)
+                    if not m:
+                        continue
+                    tag = m.group(1)
+                    unknown_tags[tag] = unknown_tags.get(tag, 0) + 1
+
+            if unknown_tags:
+                print("  ⚠️  Transcript scan found user-entries with unrecognized tag prefixes:")
+                for tag, n in sorted(unknown_tags.items(), key=lambda x: -x[1]):
+                    print(f"       {n:>4}× <{tag}...>  (not in scanner filter)")
+                print(
+                    "       If any of these are Claude-Code-injected (not real user text), "
+                    "report to https://github.com/willau95/atlast-ecp/issues so we add them to "
+                    "_CLAUDE_INTERNAL_PREFIXES."
+                )
+    except Exception:
+        pass
+
     # 3. ECP directory
     from .storage import ECP_DIR
     if ECP_DIR.exists():

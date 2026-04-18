@@ -58,6 +58,9 @@ _CLAUDE_INTERNAL_PREFIXES = (
     "<system-reminder>",      # platform-injected reminders
     "<user-prompt-submit-hook>",
     "<task-notification>",    # async background-task completion events
+    "<bash-input>",           # inline !-prefixed bash command wrapper
+    "<bash-stdout>",          # ...and its stdout
+    "<bash-stderr>",          # ...and its stderr
     "<ide_",                  # IDE-injected blocks
     "<function_",
     "[Request interrupted",   # Ctrl-C interrupt markers
