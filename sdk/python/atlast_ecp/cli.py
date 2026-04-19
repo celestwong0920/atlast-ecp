@@ -3027,6 +3027,7 @@ def cmd_doctor(args: list[str]):
                 candidate_pythons.append(match)
 
         installs: list[dict] = []
+        seen_install_paths: set = set()
         for py in candidate_pythons:
             try:
                 r = _sp.run(
@@ -3037,6 +3038,15 @@ def cmd_doctor(args: list[str]):
                 if r.returncode == 0:
                     lines = r.stdout.strip().splitlines()
                     if len(lines) >= 2:
+                        # Dedupe by where atlast_ecp actually lives on disk.
+                        # macOS has /usr/bin/python3 and
+                        # /Library/Developer/CommandLineTools/usr/bin/python3
+                        # that point at the same interpreter and thus the same
+                        # site-packages. They're one install, not two.
+                        install_real = os.path.realpath(lines[1])
+                        if install_real in seen_install_paths:
+                            continue
+                        seen_install_paths.add(install_real)
                         installs.append({"py": py, "version": lines[0], "path": lines[1]})
             except Exception:
                 continue
@@ -3537,6 +3547,7 @@ def _dashboard_check_launchagent():
     """On macOS, warn if no LaunchAgent plist — dashboard won't auto-start on reboot.
     Silent on Linux/Windows. Purely advisory; does not block startup."""
     import platform
+    from pathlib import Path
     if platform.system() != "Darwin":
         return
     plist = Path.home() / "Library" / "LaunchAgents" / "ai.atlast.ecp.dashboard.plist"
