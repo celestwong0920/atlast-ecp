@@ -3043,46 +3043,81 @@ def cmd_doctor(args: list[str]):
 
         if installs:
             versions = {i["version"] for i in installs}
+            multi_install = len(installs) > 1
+            version_drift = len(versions) > 1
+
             if len(installs) == 1:
                 print(f"  ✅ Installed once: {installs[0]['py']} → atlast-ecp {installs[0]['version']}")
-            elif len(versions) == 1:
-                print(f"  ✅ Installed in {len(installs)} Python(s), all at v{installs[0]['version']}")
+            elif not version_drift:
+                # Multi-install but all at same version. Still fragile:
+                # the next `pip install -U atlast-ecp` only upgrades one,
+                # creating drift. We warn (not error) and offer --fix.
+                print(f"  ⚠️  atlast-ecp in {len(installs)} Python(s), all at v{installs[0]['version']}:")
+                for i in installs:
+                    print(f"       {i['py']}")
+                print(f"       Safe today, drift-prone tomorrow (next pip upgrade only hits one).")
+                issues.append(
+                    f"Multiple atlast-ecp copies (same version). Recommend consolidating. "
+                    f"Run `atlast doctor --fix` to keep one and uninstall the rest."
+                )
             else:
                 print(f"  ❌ MULTI-PYTHON CONTAMINATION: atlast-ecp installed in {len(installs)} environments "
                       f"with {len(versions)} different versions:")
                 for i in installs:
                     print(f"       {i['py']}  →  v{i['version']}")
                 issues.append(
-                    "Multiple atlast-ecp installs detected. Pick the canonical Python "
-                    "(usually /Library/Developer/CommandLineTools/usr/bin/python3 on macOS) "
-                    "and uninstall the rest: for each OTHER python above, run "
-                    "`<that python> -m pip uninstall -y atlast-ecp` "
-                    "(add --break-system-packages on Homebrew). "
-                    "Then re-run `atlast init` so launchd/hook scripts point at the canonical one."
+                    "Multiple atlast-ecp installs with different versions. "
+                    "Run `atlast doctor --fix` to consolidate (keeps newest, uninstalls others). "
+                    "Or manually: <other-python> -m pip uninstall -y atlast-ecp "
+                    "(add --break-system-packages on Homebrew)."
                 )
-                if "--fix" in args:
-                    # Keep the newest version; uninstall everywhere else.
-                    from packaging.version import Version as _V  # lazy import; stdlib fallback below
+
+            # Auto-consolidate on --fix. Applies to both version-drift and
+            # same-version multi-install cases — in either case we end with
+            # exactly one copy on the canonical Python.
+            if multi_install and "--fix" in args:
+                def _ver_key(i):
                     try:
-                        def _k(i): return _V(i["version"])
+                        from packaging.version import Version as _V
+                        return _V(i["version"])
                     except Exception:
-                        def _k(i): return i["version"]
-                    keep = max(installs, key=_k)
-                    print(f"     → --fix: keeping {keep['py']} at v{keep['version']}, uninstalling others...")
-                    for i in installs:
-                        if i["py"] == keep["py"]:
-                            continue
-                        cmd = [i["py"], "-m", "pip", "uninstall", "-y", "atlast-ecp"]
-                        # Try with and without --break-system-packages depending on PEP 668 env
-                        try:
-                            _sp.run(cmd + ["--break-system-packages"],
+                        return i["version"]
+                # Keep the newest. Ties broken by preferring /usr/bin/python3
+                # on macOS (system Python never has PEP 668 / Homebrew surprises).
+                installs_sorted = sorted(installs, key=_ver_key, reverse=True)
+                top_version = installs_sorted[0]["version"]
+                top_candidates = [i for i in installs_sorted if i["version"] == top_version]
+                preferred_paths = ("/usr/bin/python3", "/Library/Developer/CommandLineTools/usr/bin/python3")
+                keep = None
+                for pref in preferred_paths:
+                    for c in top_candidates:
+                        if c["py"] == pref or os.path.realpath(c["py"]) == os.path.realpath(pref):
+                            keep = c
+                            break
+                    if keep:
+                        break
+                if not keep:
+                    keep = top_candidates[0]
+
+                print(f"     → --fix: keeping {keep['py']} at v{keep['version']}, uninstalling others...")
+                removed = 0
+                for i in installs:
+                    if i["py"] == keep["py"]:
+                        continue
+                    cmd = [i["py"], "-m", "pip", "uninstall", "-y", "atlast-ecp"]
+                    # Try with --break-system-packages first (Homebrew-installed
+                    # Pythons on macOS require it; silently ignored by others).
+                    try:
+                        r = _sp.run(cmd + ["--break-system-packages"],
                                     capture_output=True, text=True, timeout=60)
-                        except Exception:
-                            try:
-                                _sp.run(cmd, capture_output=True, text=True, timeout=60)
-                            except Exception:
-                                pass
-                    fixed.append(f"Uninstalled stale atlast-ecp copies from {len(installs) - 1} other Python(s)")
+                        if r.returncode != 0:
+                            # Retry without --break-system-packages for older pip
+                            _sp.run(cmd, capture_output=True, text=True, timeout=60)
+                        removed += 1
+                        print(f"        ✓ uninstalled from {i['py']}")
+                    except Exception as e:
+                        print(f"        ✗ failed on {i['py']}: {e}")
+                fixed.append(f"Consolidated atlast-ecp: kept {keep['py']} at v{keep['version']}, removed {removed} stale copies")
 
         # Also audit launchd plists (macOS): if any ai.atlast.ecp.* plist
         # references a Python where atlast-ecp isn't importable, the
