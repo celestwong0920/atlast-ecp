@@ -3556,6 +3556,124 @@ def _dashboard_check_launchagent():
         print("     Run `atlast init` to install the LaunchAgent (idempotent, preserves identity).\n")
 
 
+def cmd_wire(args: list[str]):
+    """atlast wire <wire_id|record_id> [--raw] [--verify] [--list] — inspect Vault v4 wire-level evidence.
+
+    Modes:
+      atlast wire <id>            Show meta + sizes + redacted headers
+      atlast wire <id> --raw      Dump raw request + response bodies (SSE / JSON)
+      atlast wire <id> --verify   Recompute on-disk hashes vs meta.json
+      atlast wire --list          List recent wire_ids
+      atlast wire <record_id>     If id starts with 'rec_', resolve via record's vault_extra.wire_ids
+    """
+    from . import wire as _wire
+    from .storage import load_record_by_id
+
+    raw = "--raw" in args
+    verify = "--verify" in args
+    do_list = "--list" in args
+    positional = [a for a in args if not a.startswith("--")]
+
+    if do_list and not positional:
+        ids = _wire.list_wire_ids()
+        if not ids:
+            print("  (no wire evidence on disk yet — run an LLM call through `atlast proxy` or `atlast claude`)")
+            return
+        print(f"  {len(ids)} wire entries (newest first):")
+        for wid in ids[:30]:
+            loaded = _wire.load_wire(wid, include_body=False)
+            if not loaded:
+                print(f"    {wid}  (unreadable)")
+                continue
+            req = loaded.get("request") or {}
+            resp = loaded.get("response") or {}
+            print(f"    {wid}  {req.get('model') or '?':<22}  "
+                  f"status={resp.get('status')}  "
+                  f"req={req.get('body_bytes')}B  resp={resp.get('body_bytes')}B  "
+                  f"sse={resp.get('is_sse')}")
+        return
+
+    if not positional:
+        print("Usage: atlast wire <wire_id|record_id> [--raw] [--verify] [--list]")
+        sys.exit(1)
+
+    target = positional[0]
+
+    # If they passed a record id, resolve to wire_ids via record meta
+    wire_ids = []
+    if target.startswith("rec_") or target.startswith("recT_"):
+        rec = load_record_by_id(target)
+        if not rec:
+            print(f"  ❌ record {target} not found")
+            sys.exit(2)
+        # vault_extra is in the vault file, not the record itself; load it
+        try:
+            from .storage import load_vault
+            vault = load_vault(target) or {}
+        except Exception:
+            vault = {}
+        ids = (vault.get("wire_ids") or []) if isinstance(vault, dict) else []
+        if not ids:
+            print(f"  ⚠️  record {target} has no wire evidence (older record or wire-disabled)")
+            sys.exit(0)
+        wire_ids = ids
+        print(f"  record {target} → {len(wire_ids)} wire roundtrip(s)")
+    else:
+        wire_ids = [target]
+
+    any_failed = False
+    for i, wid in enumerate(wire_ids):
+        if i > 0:
+            print()
+        print(f"━━━ {wid} ━━━")
+        if verify:
+            res = _wire.verify_wire_integrity(wid)
+            if res["ok"]:
+                print(f"  ✅ integrity OK  (wire_version={res.get('wire_version')})")
+            else:
+                any_failed = True
+                print(f"  ❌ integrity FAILED  reason={res.get('reason') or 'mismatch'}")
+                for issue in res.get("issues") or []:
+                    print(f"     • {issue}")
+            continue
+
+        loaded = _wire.load_wire(wid, include_body=raw)
+        if not loaded:
+            any_failed = True
+            print(f"  ❌ no wire evidence on disk for {wid}")
+            continue
+
+        req = loaded.get("request") or {}
+        resp = loaded.get("response") or {}
+        print(f"  Provider:   {loaded.get('provider')}")
+        print(f"  URL:        {req.get('method')} {req.get('url')}")
+        print(f"  Model:      {req.get('model')}")
+        print(f"  Status:     {resp.get('status')}  request-id: {resp.get('request_id')}")
+        print(f"  Tools:      {req.get('tool_count')}    Messages: {req.get('message_count')}    Streaming: {req.get('is_streaming')}")
+        print(f"  Bytes:      req={req.get('body_bytes')}B  resp={resp.get('body_bytes')}B  ({'SSE' if resp.get('is_sse') else 'JSON'})")
+        print(f"  Hashes:     req {req.get('body_sha256')}")
+        print(f"              resp {resp.get('body_sha256')}")
+        if req.get("system_prompt_sha256"):
+            print(f"              system {req.get('system_prompt_sha256')}")
+        if req.get("tool_definitions_sha256"):
+            print(f"              tools  {req.get('tool_definitions_sha256')}")
+        print(f"  Duration:   {(loaded.get('timing') or {}).get('duration_ms')}ms")
+        if raw:
+            print(f"\n  ── REQUEST BODY ──────────────────────────────────────────")
+            txt = req.get("body_text") or "(no body)"
+            print("  " + txt.replace("\n", "\n  ")[:4000])
+            if len(txt) > 4000:
+                print(f"  ... ({len(txt) - 4000} more bytes)")
+            print(f"\n  ── RESPONSE BODY ─────────────────────────────────────────")
+            txt = resp.get("body_text") or "(no body)"
+            print("  " + txt.replace("\n", "\n  ")[:4000])
+            if len(txt) > 4000:
+                print(f"  ... ({len(txt) - 4000} more bytes)")
+
+    if any_failed:
+        sys.exit(2)
+
+
 def cmd_dashboard(args: list[str]):
     """atlast dashboard [--port 3827] [--no-open] [--unsafe-expose-to-lan] — launch local web dashboard"""
     port = 3827
@@ -3701,6 +3819,7 @@ def main():
         "backup": cmd_backup,
         "sync": cmd_sync,
         "cleanup": cmd_cleanup,
+        "wire": cmd_wire,
     }
 
     if cmd in ("--help", "-h", "help"):
