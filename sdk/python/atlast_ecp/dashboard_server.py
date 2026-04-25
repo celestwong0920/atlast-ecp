@@ -824,6 +824,90 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     heatmap[dt.weekday()][dt.hour] += 1
             return {"heatmap": heatmap, "days": ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]}
 
+        elif path == "/api/wire":
+            """List recent wire roundtrips (Vault v4 evidence).
+
+            Query params:
+              limit (default 50): cap on number returned
+              record_id (optional): filter to wire_ids referenced by this record
+            """
+            from . import wire as _wire
+            from .storage import load_vault
+            limit = int(params.get("limit", ["50"])[0])
+            record_id = params.get("record_id", [None])[0]
+            wire_ids: list = []
+            if record_id:
+                vault = load_vault(record_id) or {}
+                wire_ids = (vault.get("wire_ids") or []) if isinstance(vault, dict) else []
+            else:
+                wire_ids = _wire.list_wire_ids()[:limit]
+            entries = []
+            for wid in wire_ids:
+                meta = _wire.load_wire(wid, include_body=False)
+                if not meta:
+                    continue
+                req = meta.get("request") or {}
+                resp = meta.get("response") or {}
+                entries.append({
+                    "wire_id": wid,
+                    "model": req.get("model"),
+                    "method": req.get("method"),
+                    "url": req.get("url"),
+                    "status": resp.get("status"),
+                    "request_id": resp.get("request_id"),
+                    "tool_count": req.get("tool_count"),
+                    "message_count": req.get("message_count"),
+                    "is_streaming": req.get("is_streaming"),
+                    "is_sse": resp.get("is_sse"),
+                    "request_bytes": req.get("body_bytes"),
+                    "response_bytes": resp.get("body_bytes"),
+                    "duration_ms": (meta.get("timing") or {}).get("duration_ms"),
+                    "system_prompt_sha256": req.get("system_prompt_sha256"),
+                    "tool_definitions_sha256": req.get("tool_definitions_sha256"),
+                })
+            return {"wire_entries": entries, "count": len(entries)}
+
+        elif path.startswith("/api/wire/"):
+            """Single wire entry: full meta + (optionally) body text."""
+            from . import wire as _wire
+            wire_id = path.split("/api/wire/", 1)[1].strip("/")
+            if not wire_id:
+                return {"error": "missing wire_id"}
+            include_body = params.get("body", ["1"])[0] != "0"
+            verify = params.get("verify", ["0"])[0] == "1"
+            meta = _wire.load_wire(wire_id, include_body=include_body)
+            if not meta:
+                return {"error": f"wire {wire_id} not found"}
+            if verify:
+                meta["integrity"] = _wire.verify_wire_integrity(wire_id)
+            return meta
+
+        elif path == "/api/provenance":
+            """List agent.provenance records — one per session that exists."""
+            from .query import _ensure_index, _get_db
+            _ensure_index()
+            db = _get_db()
+            agent = params.get("agent", [None])[0]
+            cond = "WHERE action = 'agent.provenance'"
+            p: list = []
+            if agent:
+                cond += " AND agent = ?"
+                p.append(agent)
+            rows = db.execute(
+                f"SELECT * FROM records {cond} ORDER BY ts DESC LIMIT 200", p
+            ).fetchall()
+            db.close()
+            out = []
+            for r in rows:
+                d = dict(r)
+                # Output_content is the JSON payload we wrote in proxy._emit_provenance_if_needed
+                try:
+                    d["payload"] = json.loads(d.get("output", "") or "{}")
+                except Exception:
+                    d["payload"] = None
+                out.append(d)
+            return {"provenance": out, "count": len(out)}
+
         return {"error": f"Unknown API: {path}"}
 
     def _get_stats(self, agent: "str | None" = None) -> dict:
